@@ -3,6 +3,8 @@ import os
 import sys
 import time
 import logging
+import datetime
+import argparse
 
 from typing import Any
 from typing import List
@@ -16,22 +18,130 @@ import tensorflow as tf
 
 from tensorflow.python.keras.utils import tf_utils
 
+# --- my module ---
+sys.path.append('../')
+import logger
+
+
+'''
+TensorFlow 2.0 implementation of pix2pix network
+
+The implementation follows the original paper version of pix2pix, introduced by Phillip Isola et al.
+
+Reference:
+    The original paper: Image-to-Image Translation with Conditional Adversarial Networks
+    Arxiv: https://arxiv.org/abs/1611.07004
+    Github: https://github.com/phillipi/pix2pix
+'''
+
 # === GPU settings ===
 os.environ['CUDAVISIBLE_DEVICES'] = '0'
 
-gpus = tf.config.experimental.list_physical_decies('GPU')
+gpus = tf.config.experimental.list_physical_devices('GPU')
 
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 
+# === Logging settings ===
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+DEFAULT_LOGGING_LEVEL = 'DEBUG'
+
 
 # === Hyper-parameters ===
-
 CHANNEL_FIRST = False  # NCHW (True) or NHWC (False)
-BATCH_SIZE = 1  # Training batch size
 IMAGE_HEIGHT = 256
 IMAGE_WIDTH = 256
+BATCH_SIZE = 1  # Training batch size
+LOG = None
 
+def make_timestamp(dtime='now', fmt='%Y-%m-%d_%H.%M.%S'):
+    '''
+    Make timestamps in specified format
+    '''
+
+    if dtime == 'now':
+        return datetime.datetime.now().strftime(fmt)
+
+    assert isinstance(dtime, datetime), 'dtime must be \'now\' or datetime object'
+
+    return dtime.strftime(fmt)
+
+def parse_args():
+
+    # create timestamp
+    day_timestamp = make_timestamp(fmt='%Y-%m-%d')
+    sec_timestamp = make_timestamp(fmt='%Y-%m-%d_%H.%M.%S')
+
+    # create parser
+    parser = argparse.ArgumentParser(description='Pix2Pix')
+    
+    # model parameters
+    parser.add_argument('--image_height', type=int, help='The height of images', default=256)
+    parser.add_argument('--image_width', type=int, help='The width of images', default=256)
+    parser.add_argument('--channel_first', help='Whether to use channel first representation', action='store_true')
+
+    # training parameters
+    parser.add_argument('--train', help='Training mode', action='store_false')
+    parser.add_argument('--batch_size', type=int, help='Training batch size', default=1)
+
+
+    # other settings
+    parser.add_argument('--seed', type=int, help='Random seed', default=None)
+    parser.add_argument('--model_dir', type=str, help='The model directory, default: ./model/ckpt-{timestamp}', 
+                                                  default='./model/ckpt-{}'.format(day_timestamp))
+    parser.add_argument('--log', type=str, help='The logging path, default: {model_dir}/pix2pix-{timestamp}.log', default=None)
+    parser.add_argument('--log_level', type=str, help='The logging level, must be one of [\'DEBUG\', \'INFO\', \'WARNING\']', 
+                                                  default=DEFAULT_LOGGING_LEVEL)
+
+    args = parser.parse_args()
+
+    if args.log is None:
+        args.log = os.path.join(args.model_dir, 'log/pix2pix-' + sec_timestamp) + '.log'
+
+    return args
+
+def apply_hyperparameters(args):
+    global IMAGE_HEIGHT
+    global IMAGE_WIDTH
+    global BATCH_SIZE
+    global LOG
+
+    # assign hyperparameters
+    IMAGE_HEIGHT = args.image_height
+    IMAGE_WIDTH = args.image_width
+    BATCH_SIZE = args.batch_size
+
+    # fixed random seed if specified
+    if args.seed is not None:
+        tf.random.seed(args.seed)
+        np.random.seed(args.seed)
+
+    # create logging path
+    os.makedirs(os.path.dirname(args.log), exist_ok=True)
+    # apply loggin settings
+    logger.Config.Use(filename=args.log, level=args.log_level, colored=True, reset=False)
+    # create logger
+    LOG = logger.getLogger('main')
+
+    # print args
+    LOG.set_header('Arguments')
+
+    LOG.subgroup('model')
+    LOG.add_row('Image height', args.image_height)
+    LOG.add_row('Image width', args.image_width)
+    LOG.add_row('Channel first', args.channel_first)
+
+    LOG.subgroup('training')
+    LOG.add_row('Training', args.train)
+    LOG.add_row('Batch size', args.batch_size)
+
+    LOG.subgroup('others')
+    LOG.add_row('Random seed', args.seed)
+    LOG.add_row('model directory', args.model_dir)
+    LOG.add_row('logging file', args.log)
+    LOG.add_row('logging level', args.log_level)
+
+    LOG.flush('INFO')
 
 
 def verify_settings_2d(s):
@@ -850,3 +960,7 @@ class Discriminator(tf.Module):
         return output
 
 
+
+
+if __name__ == '__main__':
+    apply_hyperparameters(parse_args())
