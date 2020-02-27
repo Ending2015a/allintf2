@@ -22,7 +22,7 @@ import tensorflow as tf
 from tensorflow.python.keras.utils import tf_utils
 from tensorflow.python.framework import ops
 
-from matplotlib import pyploy as plt
+from matplotlib import pyplot as plt
 
 # --- my module ---
 sys.path.append('../')
@@ -58,9 +58,15 @@ IMAGE_HEIGHT = 256
 IMAGE_WIDTH = 256
 CHANNEL_FIRST = False  # NCHW (True) or NHWC (False)
 
+INFERENCE = False
+INPUT_PATH = None
+OUTPUT_PATH = None
+
 TRAIN = False
 BATCH_SIZE = 1  # Training batch size
 LAMBDA = 100
+GEN_LR = 2e-4
+DIS_LR = 2e-4
 EPOCHS = 100
 EVAL_EPOCHS = 1
 SAVE_EPOCHS = 10
@@ -108,10 +114,16 @@ def parse_args():
     parser.add_argument('--image_width', type=int, help='The width of images', default=IMAGE_WIDTH)
     parser.add_argument('--channel_first', help='Whether to use channel first representation', action='store_true')
 
+    # inference parameters
+    parser.add_argument('-i', '--input', dest='input_path', type=str, help='Input path', default=None)
+    parser.add_argument('-o', '--output', dest='output_path', type=str, help='Output path', default=None)
+
     # training parameters
     parser.add_argument('--train', help='Training mode', action='store_false')
     parser.add_argument('--batch_size', type=int, help='Training batch size', default=BATCH_SIZE)
     parser.add_argument('--lambda', dest='gen_lambda', type=float, help='The factor for generator L1-loss', default=LAMBDA)
+    parser.add_argument('--gen_lr', type=float, help='The learning rate of Adam for the generator', default=GEN_LR)
+    parser.add_argument('--dis_lr', type=float, help='The learning rate of Adam for the discriminator', default=DIS_LR)
     parser.add_argument('--epochs', type=int, help='Training epochs', default=EPOCHS)
     parser.add_argument('--eval_epochs', type=int, help='Evaluate every N epochs', default=EVAL_EPOCHS)
     parser.add_argument('--save_epochs', type=int, help='Save model for every N epochs', default=SAVE_EPOCHS)
@@ -148,9 +160,15 @@ def apply_hyperparameters(args):
     global IMAGE_WIDTH
     global CHANNEL_FIRST
 
+    global INFERENCE
+    global INPUT_PATH
+    global OUTPUT_PATH
+
     global TRAIN
     global BATCH_SIZE
     global LAMBDA
+    global GEN_LR
+    global DIS_LR
     global EPOCHS
     global EVAL_EPOCHS
     global SAVE_EPOCHS
@@ -176,9 +194,15 @@ def apply_hyperparameters(args):
     IMAGE_WIDTH = args.image_width
     CHANNEL_FIRST = args.channel_first
 
+    INFERENCE = True if args.input_path else False
+    INPUT_PATH = args.input_path
+    OUTPUT_PATH = args.output_path
+
     TRAIN = args.train
     BATCH_SIZE = args.batch_size
     LAMBDA = args.gen_lambda
+    GEN_LR = args.gen_lr
+    DIS_LR = args.dis_lr
     EPOCHS = args.epochs
     EVAL_EPOCHS = args.eval_epochs
     SAVE_EPOCHS = args.save_epochs
@@ -197,7 +221,14 @@ def apply_hyperparameters(args):
     MODEL_NAME = args.model_name
     VERBOSE = args.verbose
 
-        
+    if INFERENCE and TRAIN:
+        raise ValueError('Input file specified for training mode is not allowed')
+
+    # output path not specified
+    if INFERENCE and OUTPUT_PATH is None:
+        fname = os.path.basename(INPUT_PATH)
+        name, ext = os.path.splitext(fname)
+        OUTPUT_PATH = './{}_generated' + ext
 
     # fixed random seed if specified
     if args.seed is not None:
@@ -215,28 +246,45 @@ def apply_hyperparameters(args):
     LOG.set_header('Arguments')
 
     LOG.subgroup('model')
-    LOG.add_row('Image height', args.image_height)
-    LOG.add_row('Image width', args.image_width)
-    LOG.add_row('Channel first', args.channel_first)
+    LOG.add_row('Image height', IMAGE_HEIGHT)
+    LOG.add_row('Image width', IMAGE_WIDTH)
+    LOG.add_row('Channel first', CHANNEL_FIRST)
 
-    LOG.subgroup('training')
-    LOG.add_row('Training', args.train)
-    LOG.add_row('Batch size', args.batch_size)
+    if TRAIN:
+        # training mode
+        LOG.subgroup('training')
+        LOG.add_row('Training', TRAIN)
+        LOG.add_row('Batch size', BATCH_SIZE)
+        LOG.add_row('Lambda', LAMBDA)
+        LOG.add_row('Generator lr', GEN_LR)
+        LOG.add_row('Discriminator lr', DIS_LR)
+        LOG.add_row('Eval epochs', EVAL_EPOCHS)
+        LOG.add_row('Save epochs', SAVE_EPOCHS)
+        LOG.add_row('Export best', EXPORT_BEST)
+        LOG.add_row('Export latest', EXPORT_LATEST)
+    
+    if not INFERENCE:
+        # training or testing mode
+        LOG.subgroup('dataset')
+        LOG.add_row('Data filename', DATA_FILENAME)
+        LOG.add_row('Data URL', DATA_URL)
+        LOG.add_row('Data root', DATA_ROOT)
+        LOG.add_row('Training set path', os.path.join(TRAIN_PATH, TRAIN_FILE))
+        LOG.add_row('Testing set path', os.path.join(TEST_PATH, TEST_FILE))
 
-    LOG.subgroup('dataset')
-    LOG.add_row('Data filename', args.data_filename)
-    LOG.add_row('Data URL', args.data_url)
-    LOG.add_row('Data root', args.data_root)
-    LOG.add_row('Training set path', os.path.join(args.train_path, args.train_file))
-    LOG.add_row('Testing set path', os.path.join(args.test_path, args.test_file))
+    if INFERENCE:
+        # inference mode
+        LOG.subgroup('inference')
+        LOG.add_row('Input path', INPUT_PATH)
+        LOG.add_row('Output path', OUTPUT_PATH)
 
     LOG.subgroup('others')
     LOG.add_row('Random seed', args.seed)
-    LOG.add_row('Model directory', args.model_dir)
-    LOG.add_row('Model name', args.model_name)
-    LOG.add_row('Logging file', args.log)
+    LOG.add_row('Model directory', MODEL_DIR)
+    LOG.add_row('Model name', MODEL_NAME)
+    LOG.add_row('Logging path', args.log_path)
     LOG.add_row('Logging level', args.log_level)
-    LOG.add_row('Verbose', args.verbose)
+    LOG.add_row('Verbose', VERBOSE)
 
     LOG.flush('INFO')
     # ====================
@@ -799,7 +847,8 @@ class BatchNorm(tf.Module):
         if not self.has_built:
         
             # get input dimensions
-            ndims = len(input.shape[:])
+            #ndims = len(input.shape[:])
+            ndims = len(input.shape)
             axis = self.axis
 
             # verify axis
@@ -863,7 +912,7 @@ class BatchNorm(tf.Module):
         #   for example, if input shape is [N, 256, 256, 3] in data format `NHWC`,
         #   and perform batch norm on axis `C`, then we have reduction_axes = `NHW`,
         #   broadcast_shape = [1, 1, 1, `C`]
-        ndims = len(input.shape[:])
+        ndims = len(input.shape)
         reduction_axes = [x for x in range(ndims) if x not in self.axis]
         broadcast_shape = [1 if x in reduction_axes else input.shape[x] for x in range(ndims)]
 
@@ -1007,7 +1056,9 @@ class Padding(tf.Module):
         # build module
         if not self.has_built:
 
-            ndims = len(input.shape[:])
+            #ndims = len(input.shape[:])
+            ndims = len(input.shape)
+
             assert ndims == 4
 
             p_h, p_w = self.padding
@@ -1318,6 +1369,7 @@ class Discriminator(tf.Module):
         loss = real_loss + gened_loss
         return loss
 
+
 def maybe_download_dataset(fname,
                            origin,
                            extract=False,
@@ -1395,6 +1447,92 @@ def create_dataset(path, is_train=True):
 
     return ds
 
+# === Inference ===
+
+def inference(input, gen, preprocess=True):
+
+    # get shape
+    ndim = len(input.shape)
+    if ndim == 3:
+        input_shape = input.shape[0:2] # H, W
+    elif ndim == 4:
+        input_shape = input.shape[1:3] # H, W
+    else:
+        raise ValueError('Unknown shape of image with dimention: {}, only accept 3D or 4D images'.format(ndim))
+
+    # resize image
+    x = tf.image.resize(input, [IMG_HEIGHT, IMG_WIDTH])
+    x_shape = x.shape
+
+    if preprocess:
+        # convert image type [-1.0, 1.0]
+        x_dtype = x.dtype
+        x = tf.image.convert_image_dtype(x, tf.float32) * 2.0 - 1.0
+
+    # reshape to 4D image
+    x = tf.reshape(x, [-1, IMG_HEIGHT, IMG_WIDTH, 3])
+    # generate
+    y_gen = gen(x)
+    # reshape to the original shape
+    y_gen = tf.reshape(y_gen, x_shape)
+
+    if preprocess:
+        # convert to original dtype
+        y_gen = tf.image.convert_image_dtype(y_gen*0.5+0.5, x_dtype)
+    
+    # resize to the original size
+    y_gen = tf.image.resize(y_gen, input_shape)
+
+    return y_gen.numpy()
+
+# === Testing phase ===
+
+@tf.function
+def test_step(input, gen, dis):
+    # x=input, y=target (real)
+    x, y = tf.split(input, num_or_size_splits=[3, 3], axis=3, num=2)
+
+    # generate fake image
+    y_gen = gen(x, training=False)
+
+    # discriminate real image
+    y_pred = dis([x, y], training=True)
+    # discriminate fake image
+    x_pred = dis([x, y_gen], training=True)
+
+    # compute generator loss
+    gen_loss = gen.loss(y, y_gen, x_pred)
+    # compute discriminator loss
+    dis_loss = dis.loss(y_pred, x_pred)
+
+    return gen_loss, dis_loss
+
+
+def test(gen, dis, test_set):
+
+    total_gen_loss = []
+    total_dis_loss = []
+    for step, data in enumerate(test_set):
+        # forward one step
+        gen_loss, dis_loss = test_step(data, gen, dis)
+
+        total_gen_loss.append(gen_loss.numpy())
+        total_dis_loss.append(dis_loss.numpy())
+
+    total_gen_loss = np.array(total_gen_loss).flatten()
+    total_dis_loss = np.array(total_dis_loss).flatten()
+
+    avg_gen_loss = np.mean(total_gen_loss)
+    avg_dis_loss = np.mean(total_dis_loss)
+
+    LOG.set_header('Test')
+    LOG.add_row('Generator average loss', avg_gen_loss, fmt='{}: {:.6f}')
+    LOG.add_row('Discriminator average loss', avg_dis_loss, fmt='{}: {:.6f}')
+    LOG.flush('INFO')
+
+
+# === Training phase ===
+
 @tf.function
 def train_step(input, gen, dis, gen_opt, dis_opt):
     # x=input, y=target (real)
@@ -1432,20 +1570,45 @@ def train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set):
 
     LOG.info('Start training for {} epochs'.format(EPOCHS))
 
-    def inference_once(epoch):
-        for data in test_set.take(1):
-            # split real/input image
-            real, input = np.split(data.numpy(), [3, 3], axis=-1)
-            # reshape images
-            real = real.reshape((IMG_HEIGHT, IMG_WIDTH, 3))
-            input = input.reshape((IMG_HEIGHT, IMG_WIDTH, 3))
-            # generate fake image
-            fake = inference(input, gen)
-            # plotting
-            plot_path = os.path.join(MODEL_DIR, 'images/{}_epoch_{}.png'.format(MODEL_NAME, epoch))
+    def plot_sample(data, fname_suffix=''):
 
-            draw(input, real, fake, plot_path)
-            LOG.info('[Image Saved] save to: {}'.format(plot_path))
+        # plotting procedure
+        def plot(x, y, y_gen, fname):
+    
+            plt.figure(figsize=(15, 6))
+
+            def add_subplot(img, title, axis):
+                plt.subplot(1, 3, axis, frameon=False)
+                plt.title(title, fontsize=24)
+                plt.imshow(img * 0.5 + 0.5)
+                plt.axis('off')
+
+            add_subplot(x, 'Input Image', 1)
+            add_subplot(y_gen, 'Generated Image', 2)
+            add_subplot(y, 'Real Image', 3)
+
+            plt.tight_layout()
+
+            # create path and save figure
+            os.makedirs(os.path.dirname(fname), exist_ok=True)
+            plt.savefig(fname)
+            LOG.info('[Image Saved] save to: {}'.format(fname))
+
+        # if data is a tensor, convert it to numpy array
+        if tf.is_tensor(data) and hasattr(data, 'numpy'):
+            data = data.numpy()
+
+        # split real/input image
+        real, input = np.split(data, [3, 3], axis=-1)
+        # reshape images
+        real = real.reshape((IMG_HEIGHT, IMG_WIDTH, 3))
+        input = input.reshape((IMG_HEIGHT, IMG_WIDTH, 3))
+        # generate fake image
+        fake = inference(input, gen, preprocess=False)
+        # plot and save image
+        plot_path = os.path.join(MODEL_DIR, 'images/{}_epoch_{}.png'.format(MODEL_NAME, fname_suffix))
+        plot(input, real, fake, plot_path)
+            
 
     for epoch in range(EPOCHS):
         start = time.time()
@@ -1461,16 +1624,18 @@ def train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set):
                 LOG.add_row('Generator loss', gen_loss)
                 LOG.add_row('Discriminator loss', dis_loss)
 
-                LOG.flush('INFO')
+                LOG.flush('DEBUG')
 
         # evaluate model for every EVAL_EPOCHS epochs
         if (EVAL_EPOCHS > 0 and 
                 epoch % EVAL_EPOCHS == 0 and 
                 epoch > 0):
             # evaluate model
-
             test(gen, dis, test_set)
-            inference_once(epoch+1)
+
+            # take only one sample to plot
+            for one_sample in test_set.take(1): pass
+            plot_sample(one_sample[0], epoch+1)
 
 
         # save model for every SAVE_EPOCHS epochs
@@ -1482,46 +1647,12 @@ def train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set):
             checkpoint.save(save_path)
             LOG.info('[Model Saved] save to: {}'.format(save_path))
 
+    # evaluate model
     test(gen, dis, test_set)
-    inference_once('final')
 
-
-
-@tf.function
-def test_step(input, gen):
-    # x=input, y=target (real)
-    x, y = tf.split(input, num_or_size_splits=[3, 3], axis=3, num=2)
-
-    # generate fake image
-    y_gen = gen(x, training=False)
-
-    plt.subplot(1)
-
-def test(gen, dis, test_set):
-
-    
-
-
-def inference(input, gen):
-
-def draw(x, y, y_gen, fname):
-    
-    plt.figure(figsize=(15, 6))
-
-    def add_subplot(img, title, axis):
-        plt.subplot(1, 3, axis, frameon=False)
-        plt.title(title, fontsize=24)
-        plt.imshow(img * 0.5 + 0.5)
-        plt.axis('off')
-
-    add_subplot(x, 'Input Image', 1)
-    add_subplot(y_gen, 'Generated Image', 2)
-    add_subplot(y, 'Real Image', 3)
-
-    os.makedirs(, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(fname)
-    
+    # take only one sample to plot
+    for one_sample in test_set.take(1): pass
+    plot_sample(one_sample[0], 'final')
 
 
 if __name__ == '__main__':
@@ -1541,9 +1672,9 @@ if __name__ == '__main__':
     # create discriminator
     dis = Discriminator()
     # create optimizer for the generator
-    gen_opt = tf.optimizers.Adam(learning_rate=2e-4, beta_1=0.5)
+    gen_opt = tf.optimizers.Adam(learning_rate=GEN_LR, beta_1=0.5)
     # create optimizer for the discriminator
-    dis_opt = tf.optimizers.Adam(learning_rate=2e-4, beta_1=0.5)
+    dis_opt = tf.optimizers.Adam(learning_rate=DIS_LR, beta_1=0.5)
 
     
     # create checkpoint
@@ -1558,6 +1689,7 @@ if __name__ == '__main__':
         LOG.warning('Restore checkpoint from: {}'.format(latest_path))
     checkpoint.restore(latest_path)
 
+    exit()
 
     if TRAIN:
         # path = {data_path}/{TRAIN_PATH}/{TRAIN_FILE}
@@ -1567,6 +1699,12 @@ if __name__ == '__main__':
                                 is_train=False)
 
         train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set)
+
+    elif INFERENCE:
+        input = plt.imread(INPUT_PATH)
+        output = inference(input, gen)
+        plt.imsave(OUTPUT_PATH, output)
+        LOG.info('[Image Saved] The image is saved to: {}'.format(OUTPUT_PATH))
 
     else:
         test_set = create_dataset(path=os.path.join(data_path, os.path.join(TEST_PATH, TEST_FILE)),
