@@ -1749,3 +1749,5 @@ if __name__ == '__main__':
         test_set = create_dataset(path=os.path.join(data_path, os.path.join(TEST_PATH, TEST_FILE)),
                                 is_train=False)
         test(gen, dis, test_set)
+
+        
