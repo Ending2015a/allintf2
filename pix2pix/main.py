@@ -2,10 +2,10 @@
 import os
 import re
 import sys
+import glob
 import time
 import inspect
 import logging
-import pathlib
 import argparse
 import datetime
 
@@ -19,7 +19,7 @@ import datetime
 import numpy as np
 import tensorflow as tf
 
-from tensorflow.python.keras.utils import tf_utils
+#from tensorflow.python.keras.utils import tf_utils
 from tensorflow.python.framework import ops
 
 from matplotlib import pyplot as plt
@@ -81,8 +81,11 @@ TEST_PATH = 'facades/val'
 TRAIN_FILE = '*.jpg'
 TEST_FILE = '*.jpg'
 
+SEED=None
 MODEL_DIR = None
 MODEL_NAME = None
+LOG_PATH = None
+LOG_LEVEL = 'INFO'
 LOG = None
 VERBOSE = False
 
@@ -119,7 +122,7 @@ def parse_args():
     parser.add_argument('-o', '--output', dest='output_path', type=str, help='Output path', default=None)
 
     # training parameters
-    parser.add_argument('--train', help='Training mode', action='store_false')
+    parser.add_argument('--train', help='Training mode', action='store_true')
     parser.add_argument('--batch_size', type=int, help='Training batch size', default=BATCH_SIZE)
     parser.add_argument('--lambda', dest='gen_lambda', type=float, help='The factor for generator L1-loss', default=LAMBDA)
     parser.add_argument('--gen_lr', type=float, help='The learning rate of Adam for the generator', default=GEN_LR)
@@ -143,9 +146,9 @@ def parse_args():
     parser.add_argument('--model_dir', type=str, help='The model directory, default: ./model/ckpt-{timestamp}', 
                                                   default='./model/ckpt-{}'.format(day_timestamp))
     parser.add_argument('--model_name', type=str, help='The name of the model', default='model')
-    parser.add_argument('--log_path', type=str, help='The logging path, default: {model_dir}/pix2pix-{timestamp}.log', default=None)
+    parser.add_argument('--log_path', type=str, help='The logging path, default: {model_dir}/pix2pix-{timestamp}.log', default=LOG_PATH)
     parser.add_argument('--log_level', type=str, help='The logging level, must be one of [\'DEBUG\', \'INFO\', \'WARNING\']', 
-                                                  default=DEFAULT_LOGGING_LEVEL)
+                                                  default=LOG_LEVEL)
     parser.add_argument('--verbose', help='If True, more loggin is printed', action='store_true')
 
     args = parser.parse_args()
@@ -183,8 +186,11 @@ def apply_hyperparameters(args):
     global TRAIN_FILE
     global TEST_FILE
 
+    global SEED
     global MODEL_DIR
     global MODEL_NAME
+    global LOG_PATH
+    global LOG_LEVEL
     global LOG
     global VERBOSE
     
@@ -217,8 +223,11 @@ def apply_hyperparameters(args):
     TRAIN_FILE = args.train_file
     TEST_FILE = args.test_file
 
+    SEED = args.seed
     MODEL_DIR = args.model_dir
     MODEL_NAME = args.model_name
+    LOG_PATH = args.log_path
+    LOG_LEVEL = args.log_level
     VERBOSE = args.verbose
 
     if INFERENCE and TRAIN:
@@ -232,13 +241,13 @@ def apply_hyperparameters(args):
 
     # fixed random seed if specified
     if args.seed is not None:
-        tf.random.seed(args.seed)
-        np.random.seed(args.seed)
+        tf.random.set_seed(SEED)
+        np.random.seed(SEED)
 
     # create logging path
-    os.makedirs(os.path.dirname(args.log_path), exist_ok=True)
+    os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     # apply loggin settings
-    logger.Config.Use(filename=args.log_path, level=args.log_level, colored=True, reset=False)
+    logger.Config.Use(filename=LOG_PATH, level=LOG_LEVEL, colored=True, reset=False)
     # create logger
     LOG = logger.getLogger('main')
 
@@ -279,15 +288,19 @@ def apply_hyperparameters(args):
         LOG.add_row('Output path', OUTPUT_PATH)
 
     LOG.subgroup('others')
-    LOG.add_row('Random seed', args.seed)
+    LOG.add_row('Random seed', SEED)
     LOG.add_row('Model directory', MODEL_DIR)
     LOG.add_row('Model name', MODEL_NAME)
-    LOG.add_row('Logging path', args.log_path)
-    LOG.add_row('Logging level', args.log_level)
+    LOG.add_row('Logging path', LOG_PATH)
+    LOG.add_row('Logging level', LOG_LEVEL)
     LOG.add_row('Verbose', VERBOSE)
 
     LOG.flush('INFO')
     # ====================
+
+if __name__ == '__main__':
+    # set hyperparameters
+    apply_hyperparameters(parse_args())
 
 def verify_settings_2d(s):
     '''
@@ -469,14 +482,14 @@ def auto_naming(self, name=None):
 
     return name
 
-
 # === Primitive Modules ===
+
 
 class Conv(tf.Module):
     def __init__(self, n_kernel,
                        size,
                        stride,
-                       gain=1.0, 
+                       gain=tf.initializers.RandomNormal(0.0, 0.02, seed=SEED),
                        bias=0.0,
                        dilations=1,
                        padding='SAME',
@@ -623,7 +636,7 @@ class Deconv(tf.Module):
     def __init__(self, n_kernel,
                        size,
                        stride,
-                       gain=1.0,
+                       gain=tf.initializers.RandomNormal(0.0, 0.02, seed=SEED),
                        bias=0.0,
                        dilations=1,
                        padding='SAME',
@@ -798,7 +811,7 @@ class BatchNorm(tf.Module):
                        gain='ones',
                        bias='zeros',
                        mean='zeros',
-                       var='ones',
+                       var=tf.initializers.Constant(value=0.02),
                        channel_first=CHANNEL_FIRST,
                        name=None):
         '''
@@ -810,8 +823,8 @@ class BatchNorm(tf.Module):
             epsilon: (float)
             gain: (float, str, tf.initializers.Initializer) gamma
             bias: (float, str, tf.initializers.Initializer) beta
-            mean: (float, str, tf.initializers.Initializer) initial mean
-            var: (float, str, tf.initializers.Initializer) initial variance
+            mean: (float, str, tf.initializers.Initializer) initial moving mean
+            var: (float, str, tf.initializers.Initializer) initial moving variance
             channel_first: (bool) NHWC or NCHW
             name: (Optional[str]) module name
         '''
@@ -838,6 +851,17 @@ class BatchNorm(tf.Module):
         self.beta = None
         self.moving_mean = None
         self.moving_var = None
+        self.broadcast_shape = None
+        self.reduction_axes = None
+
+        # set default axis if axis is None
+        if self.axis is None:
+            self.axis = 1 if self.channel_first else -1
+
+        # convert to list
+        if not isinstance(self.axis, (list, tuple)):
+            self.axis = [self.axis]
+
 
 
     @tf.Module.with_name_scope
@@ -850,17 +874,6 @@ class BatchNorm(tf.Module):
             #ndims = len(input.shape[:])
             ndims = len(input.shape)
             axis = self.axis
-
-            # verify axis
-            if axis is None:
-                if self.channel_first:
-                    axis = 1
-                else:
-                    axis = -1
-            
-            # convert axis to list
-            if not isinstance(axis, (list, tuple)):
-                axis = [axis]
 
             # normalize axis (-1 -> ndims-1)
             axis = sorted(list(set([ndims+x if x<0 else x for x in axis])))
@@ -893,13 +906,20 @@ class BatchNorm(tf.Module):
                                           dtype=tf.float32,
                                           name='var')
 
+            # broadcast gamma/beta into the correct shape
+            #   for example, if input shape is [N, 256, 256, 3] in data format `NHWC`,
+            #   and perform batch norm on axis `C`, then we have reduction_axes = `NHW`,
+            #   broadcast_shape = [1, 1, 1, `C`]
+            self.reduction_axes = [x for x in range(ndims) if x not in self.axis]
+            self.broadcast_shape = [1 if x in self.reduction_axes else input.shape[x] for x in range(ndims)]
+
 
         def apply_moving_average(variable, value, momentum):
             '''
-                a = a * momentum + delta * (1-momentum)
-            ->  a = a * (1-decay) + delta * decay   #decay = 1-momentum
-            ->  a = a - a * decay + delta * decay
-            ->  a = a - (a - delta) * decay
+                a = a * momentum + v * (1-momentum)
+            ->  a = a * (1-decay) + v * decay   #decay = 1-momentum
+            ->  a = a - a * decay + v * decay
+            ->  a = a - (a - v) * decay
             '''
             decay = tf.convert_to_tensor(1.0 - momentum, dtype=tf.float32, name='decay')
 
@@ -907,54 +927,41 @@ class BatchNorm(tf.Module):
 
             variable.assign_sub(delta=delta, name='apply_moving_average')
 
-
-        # broadcast gamma/beta into the correct shape
-        #   for example, if input shape is [N, 256, 256, 3] in data format `NHWC`,
-        #   and perform batch norm on axis `C`, then we have reduction_axes = `NHW`,
-        #   broadcast_shape = [1, 1, 1, `C`]
-        ndims = len(input.shape)
-        reduction_axes = [x for x in range(ndims) if x not in self.axis]
-        broadcast_shape = [1 if x in reduction_axes else input.shape[x] for x in range(ndims)]
-
-        # correct shapes        
-        scale = tf.reshape(self.gamma, broadcast_shape)
-        offset = tf.reshape(self.beta, broadcast_shape)
+        # correct shapes
+        scale = tf.reshape(self.gamma, [-1])
+        offset = tf.reshape(self.beta, [-1])
+        mean = tf.reshape(self.moving_mean, [-1])
+        var = tf.reshape(self.moving_var, [-1])
 
         # compute mean/variance
-
-        input = tf.convert_to_tensor(input)
-        mean, var = tf.nn.moments(input, reduction_axes, keepdims=False)
-
-        # update moving mean/variance
-        tf_utils.smart_cond(training, 
-                            lambda: apply_moving_average(self.moving_mean, mean, self.momentum),
-                            lambda: None)
-        
-        tf_utils.smart_cond(training, 
-                            lambda: apply_moving_average(self.moving_var, var, self.momentum),
-                            lambda: None)
+        #mean, var = tf.nn.moments(tf.convert_to_tensor(input), self.reduction_axes, keepdims=False)
 
 
-        # in training mode, using online mean, otherwise, using trained moving_mean
-        mean = tf_utils.smart_cond(training,
-                                   lambda: mean,
-                                   lambda: self.moving_mean)
-        
-        # in training mode, using online var, otherwise, using trained moving_var
-        var = tf_utils.smart_cond(training,
-                                  lambda: var,
-                                  lambda: self.moving_var, broadcast_shape)
+        if training:
 
-        
-        # perform batch normalization
-        output = tf.nn.batch_normalization(input,
-                                           mean=tf.reshape(mean, broadcast_shape),
-                                           variance=tf.reshape(var, broadcast_shape),
-                                           offset=offset,
-                                           scale=scale,
-                                           variance_epsilon=self.epsilon)
+            output, mean, var = tf.compat.v1.nn.fused_batch_norm( # is training
+                                    tf.convert_to_tensor(input),
+                                    scale=scale,
+                                    offset=offset,
+                                    epsilon=self.epsilon,
+                                    data_format='NCHW' if self.channel_first else 'NHWC')
+            
 
-        output.set_shape(input.shape)
+            apply_moving_average(self.moving_mean, mean, self.momentum)
+            apply_moving_average(self.moving_var, var, self.momentum)
+
+        else:
+
+            output, mean, var = tf.compat.v1.nn.fused_batch_norm( # is not training
+                                    tf.convert_to_tensor(input),
+                                    scale=scale,
+                                    offset=offset,
+                                    mean=mean,
+                                    variance=var,
+                                    epsilon=self.epsilon,
+                                    data_format='NCHW' if self.channel_first else 'NHWC',
+                                    is_training=False)
+            
 
 
         if not self.has_built:
@@ -987,7 +994,7 @@ class BatchNorm(tf.Module):
 class Dropout(tf.Module):
     def __init__(self, rate,
                        noise_shape=None,
-                       seed=None,
+                       seed=SEED,
                        name=None):
 
         super(Dropout, self).__init__(name=auto_naming(self, name))
@@ -998,15 +1005,18 @@ class Dropout(tf.Module):
 
         self.has_built = False
 
+
     @tf.Module.with_name_scope
     def __call__(self, input, training=True):
 
-        output = tf_utils.smart_cond(training,
-                                    lambda: tf.nn.dropout(input, rate=self.rate,
-                                                                 noise_shape=self.noise_shape,
-                                                                 seed=self.seed),
-                                    lambda: tf.identity(input))
-        
+
+
+        # if training, use user specified dropout rate, otherwise ignore dropout (rate=0.0)
+        rate = self.rate if training else 0.0
+
+        output = tf.nn.dropout(input, rate=rate,
+                                      noise_shape=self.noise_shape,
+                                      seed=self.seed)
 
         # print logging
         if not self.has_built:
@@ -1050,6 +1060,7 @@ class Padding(tf.Module):
         self.has_built = False
         self.pad_shape = None
 
+
     @tf.Module.with_name_scope
     def __call__(self, input, training=True):
 
@@ -1065,17 +1076,12 @@ class Padding(tf.Module):
 
             # find height/width axis
             if self.channel_first: # NCHW
-                height_axis, width_axis = 2, 3
+                self.pad_shape = [ [0, 0], [0, 0], [p_h, p_h], [p_w, p_w] ]
             else: # NHWC
-                height_axis, width_axis = 1, 2
-                
-            # create padding shape
-            self.pad_shape = [ [0, 0] for d in range(ndims) ]
-            self.pad_shape[height_axis] = [p_h, p_h]  # pad height
-            self.pad_shape[width_axis] = [p_w, p_w]  # pad width
+                self.pad_shape = [ [0, 0], [p_h, p_h], [p_w, p_w], [0, 0] ]
 
 
-        output = tf.pad(input, self.pad_shape, 
+        output = tf.pad(input, paddings=self.pad_shape,
                                mode=self.mode, 
                                constant_values=self.constant_values)
 
@@ -1102,8 +1108,6 @@ class Padding(tf.Module):
             self.has_built = True
         
         return output
-
-
 
 # === Sub Modules ===
 
@@ -1153,8 +1157,8 @@ class UpSample(tf.Module):
                        size,
                        stride=2,
                        apply_batchnorm=True,
-                       apply_activ=True,
                        apply_dropout=False,
+                       apply_activ=True,
                        name=None):
 
         super(UpSample, self).__init__(name=auto_naming(self, name))
@@ -1178,12 +1182,9 @@ class UpSample(tf.Module):
         if self.apply_dropout:
             self.dropout = Dropout(0.5)
 
+
     @tf.Module.with_name_scope
     def __call__(self, input, training=True):
-        
-        # concatenate inputs
-        if isinstance(input, (list, tuple)):
-            input = tf.concat(input, axis=-1)
 
         # forward deconvolution
         output = self.deconv(input, training=training)
@@ -1215,7 +1216,7 @@ class UNet(tf.Module):
                                 dict(n_kernel=512, size=4),
                                 dict(n_kernel=512, size=4),
                                 dict(n_kernel=512, size=4),
-                                dict(n_kernel=512, size=4) ]
+                                dict(n_kernel=512, size=4, apply_batchnorm=False, apply_activ=False) ]
 
         self.upsample_spec = [dict(n_kernel=512, size=4, apply_dropout=True),
                               dict(n_kernel=512, size=4, apply_dropout=True),
@@ -1231,34 +1232,38 @@ class UNet(tf.Module):
             self.downsamples = [ DownSample(**spec) for spec in self.downsample_spec ]
             self.upsamples = [ UpSample(**spec) for spec in self.upsample_spec ]
 
+
     @tf.Module.with_name_scope
     def __call__(self, input, training=True):
 
         outputs = []
 
         # UNet down sampling
-        for down in self.downsamples:
-            # forward downsample layers
-            output = down(input, training=training)
-            # append forwarded results
+        for layer in self.downsamples:
+            # forward downsample layers  
+            output = layer(input, training=training)
+            # append forwarded results to the TensorArray
             outputs.append(output)
             # prepare inputs for the next layer
             input = output
 
-        # remove the last output
-        outputs = reversed(outputs)
-        
-        # UNet up sampling
-        for up, out in zip(self.upsamples, outputs):
-            # for the first upsample layer, the input is the output from the 
-            # last downsample layer. Hence, only pass `input` as layer inputs.
-            # otherwise, pass `input` with `out` as layer inputs.
-            if out is input:
-                output = up(input, training=training)
-            else:
-                output = up([input, out], training=training)
 
-            # prepare inputs for the next layer
+        outputs.reverse()
+
+
+        # UNet up sampling
+        for idx in range(len(self.upsamples)):
+            # prepare inputs, concatenate input from the previous layer with the 
+            # output feature maps from the corresponding down sampling layers, except
+            # for the first up sampling layer, since its corresponding layer is the
+            # previous layer.
+            if idx > 0:
+                input = tf.concat([input, outputs[idx]], axis=-1)
+            else:
+                input = tf.nn.relu(input)
+
+            output = self.upsamples[idx](input, training=training)
+
             input = output
 
         # final activation function, normalize output between [-1, 1]
@@ -1285,6 +1290,7 @@ class Generator(tf.Module):
 
         return output
 
+    @tf.function
     def loss(self, y, y_gen, x_pred):
         '''
         generator minimize L(G) = -E[log(D(G(x)))] + lambda * L1(y-G(x))
@@ -1309,7 +1315,6 @@ class Generator(tf.Module):
         return loss
 
 
-
 class Discriminator(tf.Module):
     def __init__(self, name=None):
         super(Discriminator, self).__init__(name=auto_naming(self, name))
@@ -1331,8 +1336,7 @@ class Discriminator(tf.Module):
     def __call__(self, input, training=True):
 
         # concatenate multiple inputs
-        if isinstance(input, (tuple, list)):
-            input = tf.concat(input, axis=-1)
+        input = tf.concat(input, axis=-1)
 
         output = self.down1(input, training=training)
         output = self.down2(output, training=training)
@@ -1346,6 +1350,7 @@ class Discriminator(tf.Module):
 
         return output
 
+    @tf.function
     def loss(self, y_pred, x_pred):
         '''
         discriminator maximize L(G, D) = E[log(D(y))] + E[log(1-D(G(x)))]
@@ -1399,17 +1404,17 @@ def create_dataset(path, is_train=True):
         if is_train:
             def _process_data(img):
                 # slice image
-                real, fake = tf.split(img, [IMG_WIDTH, IMG_WIDTH], axis=1, num=2)
-                #real = tf.slice(img, [0, 0, 0], [IMG_HEIGHT, IMG_WIDTH, 3])
-                #fake = tf.slice(img, [0, IMG_WIDTH, 0], [IMG_HEIGHT, IMG_WIDTH, 3])
+                real, fake = tf.split(img, [IMAGE_WIDTH, IMAGE_WIDTH], axis=1, num=2)
+                #real = tf.slice(img, [0, 0, 0], [IMAGE_HEIGHT, IMAGE_WIDTH, 3])
+                #fake = tf.slice(img, [0, IMAGE_WIDTH, 0], [IMAGE_HEIGHT, IMAGE_WIDTH, 3])
                 # resize
-                real = tf.image.resize(real, [int(IMG_HEIGHT*1.2), int(IMG_WIDTH*1.2)])
-                fake = tf.image.resize(fake, [int(IMG_HEIGHT*1.2), int(IMG_WIDTH*1.2)])
+                real = tf.image.resize(real, [int(IMAGE_HEIGHT*1.12), int(IMAGE_WIDTH*1.12)])
+                fake = tf.image.resize(fake, [int(IMAGE_HEIGHT*1.12), int(IMAGE_WIDTH*1.12)])
                 
                 # stack [2, H, W, C]
                 stacked = tf.stack([real, fake], axis=0)
                 # random crop
-                cropped = tf.image.random_crop(stacked, size=[2, IMG_HEIGHT, IMG_WIDTH, 3])
+                cropped = tf.image.random_crop(stacked, size=[2, IMAGE_HEIGHT, IMAGE_WIDTH, 3])
                 
                 # unpack images
                 real, fake = tf.unstack(cropped, num=2, axis=0)
@@ -1423,33 +1428,41 @@ def create_dataset(path, is_train=True):
         else:
             def _process_data(img):
                 # slice image
-                real = tf.slice(img, [0, 0, 0], [IMG_HEIGHT, IMG_WIDTH, 3])
-                fake = tf.slice(img, [0, IMG_WIDTH, 0], [IMG_HEIGHT, IMG_WIDTH, 3])
+                real, fake = tf.split(img, [IMAGE_WIDTH, IMAGE_WIDTH], axis=1, num=2)
+                #real = tf.slice(img, [0, 0, 0], [IMAGE_HEIGHT, IMAGE_WIDTH, 3])
+                #fake = tf.slice(img, [0, IMAGE_WIDTH, 0], [IMAGE_HEIGHT, IMAGE_WIDTH, 3])
                 # resize
-                real = tf.image.resize(real, [IMG_HEIGHT, IMG_WIDTH])
-                fake = tf.image.resize(fake, [IMG_HEIGHT, IMG_WIDTH])
+                real = tf.image.resize(real, [IMAGE_HEIGHT, IMAGE_WIDTH])
+                fake = tf.image.resize(fake, [IMAGE_HEIGHT, IMAGE_WIDTH])
 
                 return tf.concat([fake, real], axis=2)
 
         return _process_data
 
     # list files
-    list_ds = tf.data.Dataset.list_files(path)
+    # since tf.data.Dataset.list_files can not sort the paths, use glob.glob instead.
+    #list_ds = tf.data.Dataset.list_files(path)
+    list_ds = tf.data.Dataset.from_tensor_slices(sorted(glob.glob(path)))
     # process file paths to image
     img_ds = list_ds.map(process_path, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     # process images 
     ds = img_ds.map(process_image(is_train), num_parallel_calls=tf.data.experimental.AUTOTUNE)
     
     if is_train:
-        ds = ds.cache().shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
+        ds = ds.shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
     else:
-        ds = ds.batch(1)
+        # test set, do not shuffle
+        ds = ds.batch(BATCH_SIZE)
 
     return ds
 
 # === Inference ===
 
 def inference(input, gen, preprocess=True):
+    '''
+    Args:
+        input: input image (IMAGE_HEIGHT, IMAGE_WIDTH, 3)
+    '''
 
     # get shape
     ndim = len(input.shape)
@@ -1461,7 +1474,7 @@ def inference(input, gen, preprocess=True):
         raise ValueError('Unknown shape of image with dimention: {}, only accept 3D or 4D images'.format(ndim))
 
     # resize image
-    x = tf.image.resize(input, [IMG_HEIGHT, IMG_WIDTH])
+    x = tf.image.resize(input, [IMAGE_HEIGHT, IMAGE_WIDTH])
     x_shape = x.shape
 
     if preprocess:
@@ -1470,9 +1483,9 @@ def inference(input, gen, preprocess=True):
         x = tf.image.convert_image_dtype(x, tf.float32) * 2.0 - 1.0
 
     # reshape to 4D image
-    x = tf.reshape(x, [-1, IMG_HEIGHT, IMG_WIDTH, 3])
+    x = tf.reshape(x, [-1, IMAGE_HEIGHT, IMAGE_WIDTH, 3])
     # generate
-    y_gen = gen(x)
+    y_gen = gen(x, training=False)
     # reshape to the original shape
     y_gen = tf.reshape(y_gen, x_shape)
 
@@ -1490,10 +1503,10 @@ def inference(input, gen, preprocess=True):
 @tf.function
 def test_step(input, gen, dis):
     # x=input, y=target (real)
-    x, y = tf.split(input, num_or_size_splits=[3, 3], axis=3, num=2)
+    x, y = tf.split(input, num_or_size_splits=[3, 3], axis=-1, num=2)
 
     # generate fake image
-    y_gen = gen(x, training=False)
+    y_gen = gen(x, training=True)
 
     # discriminate real image
     y_pred = dis([x, y], training=True)
@@ -1510,6 +1523,9 @@ def test_step(input, gen, dis):
 
 def test(gen, dis, test_set):
 
+    # dataset size
+    start = time.time()
+
     total_gen_loss = []
     total_dis_loss = []
     for step, data in enumerate(test_set):
@@ -1519,15 +1535,16 @@ def test(gen, dis, test_set):
         total_gen_loss.append(gen_loss.numpy())
         total_dis_loss.append(dis_loss.numpy())
 
-    total_gen_loss = np.array(total_gen_loss).flatten()
-    total_dis_loss = np.array(total_dis_loss).flatten()
+    avg_gen_loss = np.array(total_gen_loss).mean()
+    avg_dis_loss = np.array(total_dis_loss).mean()
 
-    avg_gen_loss = np.mean(total_gen_loss)
-    avg_dis_loss = np.mean(total_dis_loss)
+    end = time.time()
+    elapsed_time = datetime.timedelta(seconds=end-start)
 
     LOG.set_header('Test')
-    LOG.add_row('Generator average loss', avg_gen_loss, fmt='{}: {:.6f}')
-    LOG.add_row('Discriminator average loss', avg_dis_loss, fmt='{}: {:.6f}')
+    LOG.add_row('Time elapsed', elapsed_time)
+    LOG.add_row('Avg. Generator loss', avg_gen_loss, fmt='{}: {:.6f}')
+    LOG.add_row('Avg. Discriminator loss', avg_dis_loss, fmt='{}: {:.6f}')
     LOG.flush('INFO')
 
 
@@ -1592,6 +1609,8 @@ def train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set):
             # create path and save figure
             os.makedirs(os.path.dirname(fname), exist_ok=True)
             plt.savefig(fname)
+            # close figure
+            plt.close()
             LOG.info('[Image Saved] save to: {}'.format(fname))
 
         # if data is a tensor, convert it to numpy array
@@ -1599,49 +1618,74 @@ def train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set):
             data = data.numpy()
 
         # split real/input image
-        real, input = np.split(data, [3, 3], axis=-1)
+        x, y = np.split(data, 2, axis=-1)
         # reshape images
-        real = real.reshape((IMG_HEIGHT, IMG_WIDTH, 3))
-        input = input.reshape((IMG_HEIGHT, IMG_WIDTH, 3))
+        x = x.reshape((IMAGE_HEIGHT, IMAGE_WIDTH, 3))
+        y = y.reshape((IMAGE_HEIGHT, IMAGE_WIDTH, 3))
         # generate fake image
-        fake = inference(input, gen, preprocess=False)
+        y_gen = inference(x, gen, preprocess=False)
         # plot and save image
         plot_path = os.path.join(MODEL_DIR, 'images/{}_epoch_{}.png'.format(MODEL_NAME, fname_suffix))
-        plot(input, real, fake, plot_path)
+        plot(x, y, y_gen, plot_path)
             
+
+    # take only one sample for inference
+    for train_one_sample in train_set.take(1): pass
+    train_one_sample = train_one_sample[0]
+
+    # take only one sample for inference
+    for test_one_sample in test_set.take(1): pass
+    test_one_sample = test_one_sample[0]
 
     for epoch in range(EPOCHS):
         start = time.time()
 
+        total_gen_loss = []
+        total_dis_loss = []
+
         for step, data in enumerate(train_set):
-            
             # train for one step
-            gen_loss, dis_loss = train_step(data)
+            gen_loss, dis_loss = train_step(data, gen, dis, gen_opt, dis_opt)
 
-            if step % 100 == 0:
-                LOG.set_header('Epoch {}/{}'.format(epoch+1, EPOCHS))
-                LOG.add_row('Step {}'.format(step+1))
-                LOG.add_row('Generator loss', gen_loss)
-                LOG.add_row('Discriminator loss', dis_loss)
+            total_gen_loss.append(gen_loss.numpy())
+            total_dis_loss.append(dis_loss.numpy())
 
-                LOG.flush('DEBUG')
+            if VERBOSE:
+                if (step+1) % 100 == 0:
+                    # ==== print LOG ====
+                    LOG.set_header('Epoch {}/{}'.format(epoch+1, EPOCHS))
+                    LOG.add_row('Step', step+1)
+                    LOG.add_row('Generator loss', gen_loss, fmt='{}: {:.6f}')
+                    LOG.add_row('Discriminator loss', dis_loss, fmt='{}: {:.6f}')
+                    LOG.flush('INFO')
+                    # ===================
+
+        end = time.time()
+
+        elapsed_time = datetime.timedelta(seconds=end-start)
+        avg_gen_loss = np.array(total_gen_loss).mean()
+        avg_dis_loss = np.array(total_dis_loss).mean()
+
+        # ==== print LOG ====
+        LOG.set_header('Epoch {}/{}'.format(epoch+1, EPOCHS))
+        LOG.add_row('Time elapsed', elapsed_time, fmt='{}: {}')
+        LOG.add_row('Avg. Generator loss', avg_gen_loss, fmt='{}: {:.6f}')
+        LOG.add_row('Avg. Discriminator loss', avg_dis_loss, fmt='{}: {:.6f}')
+        LOG.flush('INFO')
+        # ====================
 
         # evaluate model for every EVAL_EPOCHS epochs
         if (EVAL_EPOCHS > 0 and 
-                epoch % EVAL_EPOCHS == 0 and 
-                epoch > 0):
+                (epoch+1) % EVAL_EPOCHS == 0):
             # evaluate model
             test(gen, dis, test_set)
-
-            # take only one sample to plot
-            for one_sample in test_set.take(1): pass
-            plot_sample(one_sample[0], epoch+1)
-
+            # inference one sample
+            plot_sample(train_one_sample, '{}_train'.format(epoch+1))
+            plot_sample(test_one_sample, '{}_test'.format(epoch+1))
 
         # save model for every SAVE_EPOCHS epochs
         if (SAVE_EPOCHS > 0 and 
-                epoch % SAVE_EPOCHS == 0 and
-                epoch > 0):
+                (epoch+1) % SAVE_EPOCHS == 0):
             # save model
             save_path = os.path.join(MODEL_DIR, MODEL_NAME)
             checkpoint.save(save_path)
@@ -1649,22 +1693,18 @@ def train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set):
 
     # evaluate model
     test(gen, dis, test_set)
-
-    # take only one sample to plot
-    for one_sample in test_set.take(1): pass
-    plot_sample(one_sample[0], 'final')
+    # inference one sample
+    plot_sample(train_one_sample, 'final_train')
+    plot_sample(test_one_sample, 'final_test')
 
 
 if __name__ == '__main__':
 
-    # set hyperparameters
-    apply_hyperparameters(parse_args())
-
     # download dataset
-    data_path = maybe_download_dataset('facades.tar.gz',
+    data_filename = maybe_download_dataset('facades.tar.gz',
                                        origin='https://people.eecs.berkeley.edu/~tinghuiz/projects/pix2pix/datasets/facades.tar.gz',
                                        extract=True)
-    
+    data_path = os.path.dirname(data_filename)
     
 
     # create generator
@@ -1689,7 +1729,6 @@ if __name__ == '__main__':
         LOG.warning('Restore checkpoint from: {}'.format(latest_path))
     checkpoint.restore(latest_path)
 
-    exit()
 
     if TRAIN:
         # path = {data_path}/{TRAIN_PATH}/{TRAIN_FILE}
