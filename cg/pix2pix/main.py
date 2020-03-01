@@ -25,7 +25,7 @@ from tensorflow.python.framework import ops
 from matplotlib import pyplot as plt
 
 # --- my module ---
-sys.path.append('../')
+sys.path.append('../../')
 import logger
 
 
@@ -489,7 +489,7 @@ class Conv(tf.Module):
     def __init__(self, n_kernel,
                        size,
                        stride,
-                       gain=tf.initializers.RandomNormal(0.0, 0.02, seed=SEED),
+                       gain=tf.initializers.RandomNormal(0.0, 0.02),
                        bias=0.0,
                        dilations=1,
                        padding='SAME',
@@ -636,7 +636,7 @@ class Deconv(tf.Module):
     def __init__(self, n_kernel,
                        size,
                        stride,
-                       gain=tf.initializers.RandomNormal(0.0, 0.02, seed=SEED),
+                       gain=tf.initializers.RandomNormal(0.0, 0.02),
                        bias=0.0,
                        dilations=1,
                        padding='SAME',
@@ -994,7 +994,7 @@ class BatchNorm(tf.Module):
 class Dropout(tf.Module):
     def __init__(self, rate,
                        noise_shape=None,
-                       seed=SEED,
+                       seed=None,
                        name=None):
 
         super(Dropout, self).__init__(name=auto_naming(self, name))
@@ -1473,14 +1473,16 @@ def inference(input, gen, preprocess=True):
     else:
         raise ValueError('Unknown shape of image with dimention: {}, only accept 3D or 4D images'.format(ndim))
 
-    # resize image
-    x = tf.image.resize(input, [IMAGE_HEIGHT, IMAGE_WIDTH])
-    x_shape = x.shape
+    input_dtype = input.dtype
 
     if preprocess:
         # convert image type [-1.0, 1.0]
-        x_dtype = x.dtype
-        x = tf.image.convert_image_dtype(x, tf.float32) * 2.0 - 1.0
+        
+        input = tf.image.convert_image_dtype(input, tf.float32) * 2.0 - 1.0
+
+    # resize image
+    x = tf.image.resize(input, [IMAGE_HEIGHT, IMAGE_WIDTH])
+    x_shape = x.shape
 
     # reshape to 4D image
     x = tf.reshape(x, [-1, IMAGE_HEIGHT, IMAGE_WIDTH, 3])
@@ -1489,12 +1491,12 @@ def inference(input, gen, preprocess=True):
     # reshape to the original shape
     y_gen = tf.reshape(y_gen, x_shape)
 
-    if preprocess:
-        # convert to original dtype
-        y_gen = tf.image.convert_image_dtype(y_gen*0.5+0.5, x_dtype)
-    
     # resize to the original size
     y_gen = tf.image.resize(y_gen, input_shape)
+
+    if preprocess:
+        # convert to original dtype
+        y_gen = tf.image.convert_image_dtype(y_gen*0.5+0.5, input_dtype)
 
     return y_gen.numpy()
 
@@ -1723,12 +1725,14 @@ if __name__ == '__main__':
                                      gen_optimizer=gen_opt,
                                      dis_optimizer=dis_opt)
 
+    gen(np.zeros((1, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32), training=TRAIN)
+    dis(np.zeros((1, IMAGE_HEIGHT, IMAGE_WIDTH, 6), dtype=np.float32), training=TRAIN)
+
     # restore checkpoint
     latest_path = tf.train.latest_checkpoint(MODEL_DIR)
     if latest_path is not None:
         LOG.warning('Restore checkpoint from: {}'.format(latest_path))
     checkpoint.restore(latest_path)
-
 
     if TRAIN:
         # path = {data_path}/{TRAIN_PATH}/{TRAIN_FILE}
@@ -1740,9 +1744,12 @@ if __name__ == '__main__':
         train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set)
 
     elif INFERENCE:
-        input = plt.imread(INPUT_PATH)
-        output = inference(input, gen)
+        
+        image = plt.imread(INPUT_PATH)
+        output = inference(image, gen, preprocess=True)
         plt.imsave(OUTPUT_PATH, output)
+
+        #plt.imsave(OUTPUT_PATH, output)
         LOG.info('[Image Saved] The image is saved to: {}'.format(OUTPUT_PATH))
 
     else:
