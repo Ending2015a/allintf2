@@ -1222,9 +1222,9 @@ class UNet(tf.Module):
                               dict(n_kernel=512, size=4, apply_dropout=True),
                               dict(n_kernel=512, size=4, apply_dropout=True),
                               dict(n_kernel=512, size=4),
-                              dict(n_kernel=512, size=4),
-                              dict(n_kernel=512, size=4),
-                              dict(n_kernel=512, size=4),
+                              dict(n_kernel=256, size=4),
+                              dict(n_kernel=128, size=4),
+                              dict(n_kernel=64, size=4),
                               dict(n_kernel=3, size=4, apply_batchnorm=False, apply_activ=False)]
 
         # create sub-modules under the name scope
