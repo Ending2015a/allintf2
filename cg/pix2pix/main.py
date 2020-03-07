@@ -1703,9 +1703,9 @@ def train(gen, dis, gen_opt, dis_opt, checkpoint, train_set, test_set):
 if __name__ == '__main__':
 
     # download dataset
-    data_filename = maybe_download_dataset('facades.tar.gz',
-                                       origin='https://people.eecs.berkeley.edu/~tinghuiz/projects/pix2pix/datasets/facades.tar.gz',
-                                       extract=True)
+    data_filename = maybe_download_dataset(DATA_FILENAME,
+                                           origin=DATA_URL,
+                                           extract=True)
     data_path = os.path.dirname(data_filename)
     
 
