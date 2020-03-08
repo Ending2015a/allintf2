@@ -74,15 +74,23 @@ TEST_A_FILE: str = '*.jpg'
 TEST_B_FILE: str = '*.jpg'
 LABELS: list = ['Horse', 'Zebra', 'Horse -> Zebra', 'Zebra -> Horse']
 
-SEED: int = None          # random seed
-MODEL_DIR: str = None     # checkpoint path
-MODEL_NAME: str = None    # checkpoint name
-LOG_PATH: str = None      # logging path
-LOG_LEVEL: str = 'INFO'   # logging level
-LOG = None                # logger
-VERBOSE: bool = False     # show more log info
+SEED: int = None               # random seed
+GENERATOR: str = 'unet256'     # generator architecture ['EncoderDecoder', 'UNet256', 'UNet128', 'ResNet6Blocks', 'ResNet9Blocks']
+DISCRIMINATOR: str = 'DBasic'  # discriminator architecture ['DBasic', 'DImageGAN']
+MODEL_DIR: str = None          # checkpoint path
+MODEL_NAME: str = None         # checkpoint name
+LOG_PATH: str = None           # logging path
+LOG_LEVEL: str = 'INFO'        # logging level
+LOG = None                     # logger
+VERBOSE: bool = False          # show more log info
 
 BUFFER_SIZE: int = 100  # buffer size for shuffling training datasets
+
+def available_generators():
+    return ['EncoderDecoder', 'UNet256', 'UNet128', 'ResNet6Blocks', 'ResNet9Blocks']
+
+def available_discriminators():
+    return ['DBasic', 'DImageGAN']
 
 def make_timestamp(dtime='now', fmt='%Y-%m-%d_%H.%M.%S'):
     '''
@@ -147,6 +155,10 @@ def parse_args():
     # other settings
     parser.add_argument('--gpus', type=int, nargs='+', help='GPUs to use', default=0)
     parser.add_argument('--seed', type=int, help='Random seed', default=None)
+    parser.add_argument('--generator', type=str, help='Generator architecture, must be one of '
+                                    '[\'EncoderDecoder\', \'UNet128\', \'UNet256\', \'ResNet6Blocks\', \'ResNet9Blocks\']', default=GENERATOR)
+    parser.add_argument('--discriminator', type=str, help='Discriminator architecture, must be one of '
+                                    '[\'DBasic\', \'DImageGAN\']', default=DISCRIMINATOR)
     parser.add_argument('--model_dir', type=str, help='The model directory, default: ./model/ckpt-{timestamp}', 
                                                   default='./model/ckpt-{}'.format(day_timestamp))
     parser.add_argument('--model_name', type=str, help='The name of the model', default='model')
@@ -199,6 +211,8 @@ def apply_hyperparameters(args):
     global TEST_B_FILE
 
     global SEED
+    global GENERATOR
+    global DISCRIMINATOR
     global MODEL_DIR
     global MODEL_NAME
     global LOG_PATH
@@ -244,11 +258,17 @@ def apply_hyperparameters(args):
     TEST_B_FILE = args.test_b_file
 
     SEED = args.seed
+    GENERATOR = args.generator
+    DISCRIMINATOR = args.discriminator
     MODEL_DIR = args.model_dir
     MODEL_NAME = args.model_name
     LOG_PATH = args.log_path
     LOG_LEVEL = args.log_level
     VERBOSE = args.verbose
+
+    # assertion
+    assert GENERATOR in available_generators(), 'The generators must one of {!r}'.format(available_generators())
+    assert DISCRIMINATOR in available_discriminators(), 'The discriminators must be one of {!r}'.format(available_discriminators())
 
     if INFERENCE and TRAIN:
         raise ValueError('Input file specified for training mode is not allowed')
@@ -266,7 +286,7 @@ def apply_hyperparameters(args):
         LOG.warning('The export path is not specified. The model will be exported to: {}'.format(EXPORT_PATH))
 
     # GPU settings
-    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(args.gpus)
+    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(n) for n in args.gpus])
 
     gpus = tf.config.experimental.list_physical_devices('GPU')
 
@@ -344,6 +364,8 @@ def apply_hyperparameters(args):
 
     LOG.subgroup('others')
     LOG.add_row('Random seed', SEED)
+    LOG.add_row('Generator', GENERATOR)
+    LOG.add_row('Discriminator', DISCRIMINATOR)
     LOG.add_row('Model directory', MODEL_DIR)
     LOG.add_row('Model name', MODEL_NAME)
     LOG.add_row('Logging path', LOG_PATH)
@@ -1286,7 +1308,10 @@ class DownSample(tf.Module):
                        stride=2,
                        apply_norm=True,
                        apply_activ=True,
+                       is_biased=False,
                        norm_type=InstanceNorm,
+                       activ_type='leaky_relu', # ['leaky_relu', 'relu']
+                       padding='SAME',
                        name=None):
         super(DownSample, self).__init__(name=auto_naming(self, name))
 
@@ -1296,12 +1321,19 @@ class DownSample(tf.Module):
         self.conv = Conv(n_kernel=n_kernel, 
                          size=size, 
                          stride=stride,
-                         padding='SAME',
-                         is_biased=False)
-        
+                         padding=padding,
+                         is_biased=is_biased)
+
         if self.apply_norm:
             self.norm = norm_type()
         
+        if self.apply_activ:
+            if activ_type == 'leaky_relu':
+                self.activ = tf.nn.leaky_relu
+                self.activ_kwargs = dict(alpha=0.2)
+            elif activ_type == 'relu':
+                self.activ = tf.nn.relu
+                self.activ_kwargs = dict()
 
     def __call__(self, input, training=True):
 
@@ -1311,7 +1343,8 @@ class DownSample(tf.Module):
             output = self.norm(output, training=training)
 
         if self.apply_activ:
-            output = tf.nn.leaky_relu(output, alpha=0.2)
+            output = self.activ(output, **self.activ_kwargs)
+            #output = tf.nn.leaky_relu(output, alpha=0.2)
 
         return output
 
@@ -1322,7 +1355,9 @@ class UpSample(tf.Module):
                        apply_norm=True,
                        apply_dropout=False,
                        apply_activ=True,
+                       is_biased=False,
                        norm_type=InstanceNorm,
+                       padding='SAME',
                        name=None):
 
         super(UpSample, self).__init__(name=auto_naming(self, name))
@@ -1335,8 +1370,8 @@ class UpSample(tf.Module):
         self.deconv = Deconv(n_kernel=n_kernel,
                            size=size,
                            stride=stride,
-                           padding='SAME',
-                           is_biased=False)
+                           padding=padding,
+                           is_biased=is_biased)
 
         if self.apply_norm:
             self.norm = norm_type()
@@ -1381,7 +1416,7 @@ class EncoderDecoder(tf.Module):
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 8, 8, ngf*8]
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 4, 4, ngf*8]
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 2, 2, ngf*8]
-                                dict(n_kernel=512, size=4, apply_norm=False, apply_activ=False) ] # output shape: [batch, 1, 1, ngf*8]
+                                dict(n_kernel=512, size=4, apply_norm=False, activ_type='relu') ] # output shape: [batch, 1, 1, ngf*8]
         
         self.upsample_spec = [dict(n_kernel=512, size=4, apply_dropout=True),      # output shape: [batch, 2, 2, ngf*8]
                               dict(n_kernel=512, size=4, apply_dropout=True),      # output shape: [batch, 4, 4, ngf*8]
@@ -1412,8 +1447,6 @@ class EncoderDecoder(tf.Module):
         # DEBUG: check bottle neck
         #LOG.debug('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
         #LOG.debug('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :, :, 100])) #1*1*100
-
-        input = tf.nn.relu(input)
 
         for layer in self.upsamples:
             # forward upsample layers
@@ -1449,7 +1482,7 @@ class UNet128(tf.Module):
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 8, 8, ngf*8]
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 4, 4, ngf*8]
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 2, 2, ngf*8]
-                                dict(n_kernel=512, size=4, apply_norm=False, apply_activ=False) ] # output shape: [batch, 1, 1, ngf*8]
+                                dict(n_kernel=512, size=4, apply_norm=False, activ_type='relu') ] # output shape: [batch, 1, 1, ngf*8]
         
         self.upsample_spec = [dict(n_kernel=512, size=4, apply_dropout=True),      # output shape: [batch, 2, 2, ngf*8]
                               dict(n_kernel=512, size=4, apply_dropout=True),      # output shape: [batch, 4, 4, ngf*8]
@@ -1492,8 +1525,6 @@ class UNet128(tf.Module):
             # previous layer.
             if idx > 0:
                 input = tf.concat([input, outputs[idx]], axis=-1)
-            else:
-                input = tf.nn.relu(input)
 
             output = self.upsamples[idx](input, training=training)
 
@@ -1528,7 +1559,7 @@ class UNet256(tf.Module):
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 8, 8, ngf*8]
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 4, 4, ngf*8]
                                 dict(n_kernel=512, size=4),                        # output shape: [batch, 2, 1, ngf*8]
-                                dict(n_kernel=512, size=4, apply_norm=False, apply_activ=False) ] # output shape: [batch, 1, 1, ngf*8]
+                                dict(n_kernel=512, size=4, apply_norm=False, activ_type='relu') ] # output shape: [batch, 1, 1, ngf*8]
         
         self.upsample_spec = [dict(n_kernel=512, size=4, apply_dropout=True),      # output shape: [batch, 2, 2, ngf*8]
                               dict(n_kernel=512, size=4, apply_dropout=True),      # output shape: [batch, 4, 4, ngf*8]
@@ -1573,8 +1604,6 @@ class UNet256(tf.Module):
             # previous layer.
             if idx > 0:
                 input = tf.concat([input, outputs[idx]], axis=-1)
-            else:
-                input = tf.nn.relu(input)
 
             output = self.upsamples[idx](input, training=training)
 
@@ -1603,32 +1632,40 @@ class ConvBlock(tf.Module):
     def __init__(self, n_kernel,
                        size=3,
                        stride=1,
+                       is_biased=True,
                        norm_type=InstanceNorm,
                        name=None):
         super(ConvBlock, self).__init__(name=auto_naming(self, name))
 
+        self.pad1 = Padding(padding=1, mode='REFLECT')
         self.conv1 = Conv(n_kernel=n_kernel, 
                           size=size, 
                           stride=stride,
-                          padding='SAME',
-                          is_biased=False)
+                          padding='VALID',
+                          is_biased=is_biased)
 
         self.norm1 = norm_type()
+        self.pad2 = Padding(padding=1, mode='REFLECT')
         self.conv2 = Conv(n_kernel=n_kernel,
                           size=size,
                           stride=stride,
-                          padding='SAME',
-                          is_biased=False)
+                          padding='VALID',
+                          is_biased=is_biased)
 
         self.norm2 = norm_type()
 
     def __call__(self, input, training=True):
 
-        output = self.conv1(input, training=training)
-        output = self.norm(output, training=training)
+        # input shape: [batch, N, N, M]
+        output = self.pad1(input, training=training)
+        output = self.conv1(output, training=training)
+        output = self.norm1(output, training=training)
         output = tf.nn.relu(output)
+
+        output = self.pad2(output, training=training)
         output = self.conv2(output, training=training)
-        output = self.norm(output, training=training)
+        output = self.norm2(output, training=training)
+        # output shape: [batch, N, N, n_kernel]
 
         return output
 
@@ -1640,13 +1677,14 @@ class ResBlock(tf.Module):
         https://github.com/junyanz/CycleGAN/blob/master/models/architectures.lua#L221-L230
     '''
     def __init__(self, n_kernel,
+                       is_biased=True,
                        norm_type=InstanceNorm,
                        name=None):
 
         super(ResBlock, self).__init__(name=auto_naming(self, name))
 
         with self.name_scope:
-            self.conv_block = ConvBlock(n_kernel, norm_type=norm_type)
+            self.conv_block = ConvBlock(n_kernel, norm_type=norm_type, is_biased=is_biased)
 
     @tf.Module.with_name_scope
     def __call__(self, input, training=True):
@@ -1657,6 +1695,119 @@ class ResBlock(tf.Module):
 
         return output
 
+
+class ResNet6Blocks(tf.Module):
+    def __init__(self, name=None):
+        
+        super(ResNet6Blocks, self).__init__(name=auto_naming(self, name))
+
+        self.downsample_spec = [dict(n_kernel=64, size=7, stride=1, is_biased=True, activ_type='relu', padding='VALID'),   # ngf
+                                dict(n_kernel=128, size=3, stride=2, is_biased=True, activ_type='relu'),  # ngf*2
+                                dict(n_kernel=256, size=3, stride=2, is_biased=True, activ_type='relu')]  # ngf*4
+        self.resblock_spec = [dict(n_kernel=256, is_biased=True),  # ngf*4
+                              dict(n_kernel=256, is_biased=True),  # ngf*4
+                              dict(n_kernel=256, is_biased=True),  # ngf*4
+                              dict(n_kernel=256, is_biased=True),  # ngf*4
+                              dict(n_kernel=256, is_biased=True),  # ngf*4
+                              dict(n_kernel=256, is_biased=True)]  # ngf*4
+        self.upsample_spec = [dict(n_kernel=128, size=3, stride=2, is_biased=True),   # ngf*2
+                              dict(n_kernel=64, size=3, stride=2, is_biased=True)]    # ngf
+
+        with self.name_scope:
+            self.downsamples = [DownSample(**spec) for spec in self.downsample_spec]
+            self.resblocks = [ResBlock(**spec) for spec in self.resblock_spec]
+            self.upsamples = [UpSample(**spec) for spec in self.upsample_spec]
+
+            self.pad1 = Padding(padding=3, mode='REFLECT')
+            self.pad2 = Padding(padding=3, mode='REFLECT')
+            self.conv = Conv(n_kernel=3, size=7, stride=1, is_biased=False, padding='VALID')
+
+
+    def __call__(self, input, training=True):
+
+        # input shape: [batch, 128, 128, 3]
+        input = self.pad1(input, training=training)
+
+        # input shape: [batch, 134, 134, 3]
+        for layer in self.downsamples:
+            output = layer(input, training=training)
+            input = output
+        
+        # input shape: [batch, 32, 32, 256]
+        for layer in self.resblocks:
+            output = layer(input, training=training)
+            input = output
+
+        # input shape: [batch, 32, 32, 256]
+        for layer in self.upsamples:
+            output = layer(input, training=training)
+            input = output
+
+        # input shape: [batch, 128, 128, 64]
+        output = self.pad2(input, training=training)
+        output = self.conv(output, training=training)
+
+        output = tf.nn.tanh(output)
+
+        return output
+
+
+class ResNet9Blocks(tf.Module):
+    def __init__(self, name=None):
+        
+        super(ResNet9Blocks, self).__init__(name=auto_naming(self, name))
+
+        self.downsample_spec = [dict(n_kernel=64, size=7, stride=1, is_biased=True, activ_type='relu', padding='VALID'),
+                                dict(n_kernel=128, size=3, stride=2, is_biased=True, activ_type='relu'),
+                                dict(n_kernel=256, size=3, stride=2, is_biased=True, activ_type='relu')]
+        self.resblock_spec = [dict(n_kernel=256, is_biased=True),
+                              dict(n_kernel=256, is_biased=True),
+                              dict(n_kernel=256, is_biased=True),
+                              dict(n_kernel=256, is_biased=True),
+                              dict(n_kernel=256, is_biased=True),
+                              dict(n_kernel=256, is_biased=True),
+                              dict(n_kernel=256, is_biased=True),
+                              dict(n_kernel=256, is_biased=True),
+                              dict(n_kernel=256, is_biased=True)]
+        self.upsample_spec = [dict(n_kernel=128, size=3, stride=2, is_biased=True),
+                              dict(n_kernel=64, size=3, stride=2, is_biased=True)]
+
+        with self.name_scope:
+            self.downsamples = [DownSample(**spec) for spec in self.downsample_spec]
+            self.resblocks = [ResBlock(**spec) for spec in self.resblock_spec]
+            self.upsamples = [UpSample(**spec) for spec in self.upsample_spec]
+
+            self.pad1 = Padding(padding=3, mode='REFLECT')
+            self.pad2 = Padding(padding=3, mode='REFLECT')
+            self.conv = Conv(n_kernel=3, size=7, stride=1, is_biased=False, padding='VALID')
+
+    def __call__(self, input, training=True):
+
+        # input shape: [batch, 128, 128, 3]
+        input = self.pad1(input, training=training)
+
+        # input shape: [batch, 134, 134, 3]
+        for layer in self.downsamples:
+            output = layer(input, training=training)
+            input = output
+        
+        # input shape: [batch, 32, 32, 256]
+        for layer in self.resblocks:
+            output = layer(input, training=training)
+            input = output
+
+        # input shape: [batch, 32, 32, 256]
+        for layer in self.upsamples:
+            output = layer(input, training=training)
+            input = output
+
+        # input shape: [batch, 128, 128, 64]
+        output = self.pad2(input, training=training)
+        output = self.conv(output, training=training)
+
+        output = tf.nn.tanh(output)
+
+        return output
 
 
 class Generator(tf.Module):
@@ -1834,11 +1985,9 @@ class DBasic(tf.Module):
             self.down2 = DownSample(128, 4) # output shape: [batch, 64, 64, nfg*2]
             self.down3 = DownSample(256, 4) # output shape: [batch, 32, 32, nfg*4]
             
-            self.pad1 = Padding()           # output shape: [batch, 34, 34, nfg*4]
-            self.down4 = DownSample(512, 4, stride=1) # output shape: [batch, 34, 34, nfg*8]
+            self.down4 = DownSample(512, 4, stride=1) # output shape: [batch, 32, 32, nfg*8]
 
-            self.pad2 = Padding()           # output shape: [batch, 36, 36, nfg * 8]
-            self.conv2 = Conv(1, 4, stride=1, is_biased=True) # output shape: [batch, 36, 36, 1]
+            self.conv1 = Conv(1, 4, stride=1, is_biased=True) # output shape: [batch, 32, 32, 1]
 
 
 
@@ -1848,22 +1997,8 @@ class DBasic(tf.Module):
         output = self.down1(input, training=training)
         output = self.down2(output, training=training)
         output = self.down3(output, training=training)
-
-        output = self.pad1(output, training=training)
-        # DEBUG:
-        #out_temp = self.down4(output, training=training)
         output = self.down4(output, training=training)
-
-        # DEBUG:
-        #output = self.pad2(out_temp, training=training)
-        #output = self.conv2(output, training=training)
-        output = self.pad2(output, training=training)
-        output = self.conv2(output, training=training)
-
-        # DEBUG: check network outputs
-        #LOG.debug('training = {}, scope = {}'.format(training, self.conv2.name_scope.name))
-        #LOG.debug('input = \n{}'.format(out_temp.numpy()[0, :1, :1, :100])) #1*36*100
-        #LOG.debug('output = \n{}'.format(output.numpy()[0, :1, :, 0])) # 1*36*1
+        output = self.conv1(output, training=training)
 
         return output
 
@@ -2364,11 +2499,11 @@ if __name__ == '__main__':
                                            extract=True)
     data_path = os.path.dirname(data_filename)
 
-    # create generators and discriminators
-    genAB = Generator(net=UNet256, name='genAB') # A -> B
-    genBA = Generator(net=UNet256, name='genBA') # B -> A
-    disAB = Discriminator(net=DBasic, name='disAB')
-    disBA = Discriminator(net=DBasic, name='disBA')
+    # create generators and discriminators (default: ResNet6Blocks, DBasic)
+    genAB = Generator(net=eval(GENERATOR), name='genAB') # A -> B
+    genBA = Generator(net=eval(GENERATOR), name='genBA') # B -> A
+    disAB = Discriminator(net=eval(DISCRIMINATOR), name='disAB')
+    disBA = Discriminator(net=eval(DISCRIMINATOR), name='disBA')
 
     # create optimizers
     genAB_opt = tf.optimizers.Adam(learning_rate=GEN_LR, beta_1=0.5)
