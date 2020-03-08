@@ -1388,8 +1388,8 @@ class EncoderDecoder(tf.Module):
             input = output
 
         # DEBUG: check bottle neck
-        LOG.warning('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
-        LOG.warning('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :, :, 100])) #1*1*100
+        #LOG.debug('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
+        #LOG.debug('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :, :, 100])) #1*1*100
 
         input = tf.nn.relu(input)
 
@@ -1400,8 +1400,8 @@ class EncoderDecoder(tf.Module):
             input = output
 
         # DEBUG: check network outputs
-        LOG.warning('training = {}, scope = {}'.format(training, self.upsamples[-1].name_scope.name))
-        LOG.warning('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :3, :10, :])) #3*10*3
+        #LOG.debug('training = {}, scope = {}'.format(training, self.upsamples[-1].name_scope.name))
+        #LOG.debug('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :3, :10, :])) #3*10*3
 
         # final activation function, normalize output between [-1, 1]
         output = tf.nn.tanh(input)
@@ -1457,8 +1457,8 @@ class UNet128(tf.Module):
             input = output
 
         # DEBUG: check bottle neck
-        LOG.warning('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
-        LOG.warning('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :, :, 100])) #1*1*100
+        #LOG.debug('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
+        #LOG.debug('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :, :, 100])) #1*1*100
 
         outputs.reverse()
 
@@ -1478,8 +1478,8 @@ class UNet128(tf.Module):
             input = output
         
         # DEBUG: check network outputs
-        LOG.warning('training = {}, scope = {}'.format(training, self.upsamples[-1].name_scope.name))
-        LOG.warning('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :3, :10, :])) #3*10*3
+        #LOG.debug('training = {}, scope = {}'.format(training, self.upsamples[-1].name_scope.name))
+        #LOG.debug('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :3, :10, :])) #3*10*3
 
         # final activation function, normalize output between [-1, 1]
         output = tf.nn.tanh(input)
@@ -1538,8 +1538,8 @@ class UNet256(tf.Module):
             input = output
 
         # DEBUG: check bottle neck
-        LOG.warning('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
-        LOG.warning('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :, :, :100])) #1*1*100
+        #LOG.debug('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
+        #LOG.debug('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :, :, :100])) #1*1*100
 
         outputs.reverse()
 
@@ -1559,8 +1559,8 @@ class UNet256(tf.Module):
             input = output
 
         # DEBUG: check network outputs
-        LOG.warning('training = {}, scope = {}'.format(training, self.upsamples[-1].name_scope.name))
-        LOG.warning('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :1, :10, :])) #1*10*3
+        #LOG.debug('training = {}, scope = {}'.format(training, self.upsamples[-1].name_scope.name))
+        #LOG.debug('output shape = {}, output = \n{}'.format(input.shape, input.numpy()[0, :1, :10, :])) #1*10*3
 
         # final activation function, normalize output between [-1, 1]
         output = tf.nn.tanh(input)
@@ -1647,7 +1647,7 @@ class Generator(tf.Module):
         with self.name_scope:
             self.net = net()
 
-
+    @tf.function
     @tf.Module.with_name_scope
     def __call__(self, input, training=True):
 
@@ -1675,6 +1675,7 @@ class Generator(tf.Module):
 
         loss = (real_loss + gened_loss) * 0.5
         return loss
+
 
     def loss(self, x, y, x_regen, y_regen, x_pred, y_id, lambda1, lambda2, verbose=False):
         '''
@@ -1773,19 +1774,19 @@ class DImageGAN(tf.Module):
 
     def __call__(self, input, training=True):
 
-        outputs = []
+        #outputs = []
 
         output = input
         # input shape: 256 x 256 x 3
         for layer in self.downsamples:
             output = layer(output, training=training)
             # DEBUG:
-            outputs.append(output)
+            #outputs.append(output)
 
         # DEBUG: check network outputs
-        LOG.warning('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
-        LOG.warning('input = \n{}'.format(outputs[-2].numpy()[0, :, :, :25])) #2*2*25
-        LOG.warning('output = \n{}'.format(outputs[-1].numpy()[0, :, :, :])) # 1*1*1
+        #LOG.debug('training = {}, scope = {}'.format(training, self.downsamples[-1].name_scope.name))
+        #LOG.debug('input = \n{}'.format(outputs[-2].numpy()[0, :, :, :25])) #2*2*25
+        #LOG.debug('output = \n{}'.format(outputs[-1].numpy()[0, :, :, :])) # 1*1*1
 
         # output shape: 1 x 1 x 1
         return output
@@ -1828,19 +1829,19 @@ class DBasic(tf.Module):
 
         output = self.pad1(output, training=training)
         # DEBUG:
-        out_temp = self.down4(output, training=training)
-        #output = self.down4(output, training=training)
+        #out_temp = self.down4(output, training=training)
+        output = self.down4(output, training=training)
 
         # DEBUG:
-        output = self.pad2(out_temp, training=training)
-        output = self.conv2(output, training=training)
-        #output = self.pad2(output, training=training)
+        #output = self.pad2(out_temp, training=training)
         #output = self.conv2(output, training=training)
+        output = self.pad2(output, training=training)
+        output = self.conv2(output, training=training)
 
         # DEBUG: check network outputs
-        LOG.warning('training = {}, scope = {}'.format(training, self.conv2.name_scope.name))
-        LOG.warning('input = \n{}'.format(out_temp.numpy()[0, :1, :1, :100])) #1*36*100
-        LOG.warning('output = \n{}'.format(output.numpy()[0, :1, :, 0])) # 1*36*1
+        #LOG.debug('training = {}, scope = {}'.format(training, self.conv2.name_scope.name))
+        #LOG.debug('input = \n{}'.format(out_temp.numpy()[0, :1, :1, :100])) #1*36*100
+        #LOG.debug('output = \n{}'.format(output.numpy()[0, :1, :, 0])) # 1*36*1
 
         return output
 
@@ -1868,6 +1869,7 @@ class Discriminator(tf.Module):
         with self.name_scope:
             self.net = net()
 
+    @tf.function
     @tf.Module.with_name_scope
     def __call__(self, input, training=True):
         
@@ -1992,27 +1994,66 @@ def create_dataset(path, is_train=True):
     return ds
 
 
-def inference():
-    pass
+def inference(input, gen, preprocess=True):
+    '''
+    Args:
+        input: input image (IMAGE_HEIGHT, IMAGE_WIDTH, 3), the dimension must be wither 3D or 4D
+    '''
 
+    # get shape
+    ndim = len(input.shape)
+    if ndim == 3:
+        input_shape = input.shape[0:2]
+    elif ndim == 4:
+        input_shape = input.shape[1:3]
+    else:
+        raise ValueError('Unknown shape of image with dimension: {}, only accept 3D or 4D images'.format(ndim))
 
-def test_step(x, y, genAB, genBA, disAB, disBA):
+    input_dtype = input.dtype
+
+    if preprocess:
+        input = tf.image.convert_image_dtype(input, tf.float32) * 2.0 - 1.0
+
+    # resize image
+    x = tf.image.resize(input, [IMAGE_HEIGHT, IMAGE_WIDTH])
+    x_shape = x.shape
+
+    # reshape to 4D image
+    x = tf.reshape(x, [-1, IMAGE_HEIGHT, IMAGE_WIDTH, 3])
     # generate
-    b_gen = genAB(a, training=True) #G(x)
-    a_gen = genBA(b, training=True) #
-    a_regen = genBA(b_gen, training=True)
-    b_regen = genAB(a_gen, training=True)
-    a_id = genBA(a, training=True)
-    b_id = genAB(b, training=True)
+    y_gen = gen(x, training=False)
+    # reshape to the original shape
+    y_gen= tf.reshape(y_gen, x_shape)
+
+    # resize to the original size
+    y_gen = tf.image.resize(y_gen, input_shape)
+
+    if preprocess:
+        # convert to original dtype
+        y_gen = tf.image.convert_image_dtype(y_gen*0.5+0.5, input_dtype)
+
+    return y_gen.numpy()
+
+@tf.function
+def test_step(a, b, genAB, genBA, disAB, disBA):
+    # generate
+    b_gen = genAB(a, training=False) #G(x)
+    a_gen = genBA(b, training=False) #
+    a_regen = genBA(b_gen, training=False)
+    b_regen = genAB(a_gen, training=False)
+    a_id = genBA(a, training=False)
+    b_id = genAB(b, training=False)
 
     # discriminate
-    b_pred = disAB(b, training=True)
-    a_pred = disBA(a, training=True)
-    gen_b_pred = disAB(b_gen, training=True)
-    gen_a_pred = disBA(a_gen, training=True)
+    b_pred = disAB(b, training=False)
+    a_pred = disBA(a, training=False)
+    gen_b_pred = disAB(b_gen, training=False)
+    gen_a_pred = disBA(a_gen, training=False)
     
-    gen_ab_loss, *gen_ab_misc = genAB.loss(a, b, a_regen, b_regen, a_pred, b_id, CYCLE_A_LAMBDA, CYCLE_B_LAMBDA, verbose=VERBOSE)
-    gen_ba_loss, *gen_ba_misc = genBA.loss(b, a, b_regen, a_regen, b_pred, a_id, CYCLE_B_LAMBDA, CYCLE_A_LAMBDA, verbose=VERBOSE)
+    #----------------------------------    x, y, F(G(x)), G(F(y)), D(G(x)),    G(y), lambda1,        lambda2)
+    gen_ab_loss, *gen_ab_misc = genAB.loss(a, b, a_regen, b_regen, gen_b_pred, b_id, CYCLE_A_LAMBDA, CYCLE_B_LAMBDA, verbose=VERBOSE)
+    gen_ba_loss, *gen_ba_misc = genBA.loss(b, a, b_regen, a_regen, gen_a_pred, a_id, CYCLE_B_LAMBDA, CYCLE_A_LAMBDA, verbose=VERBOSE)
+    #----------------------  D(y),   D(G(x))
     dis_ab_loss = disAB.loss(b_pred, gen_b_pred)
     dis_ba_loss = disBA.loss(a_pred, gen_a_pred)
 
@@ -2049,7 +2090,7 @@ def test(genAB, genBA, disAB, disBA, test_setA, test_setB):
             total_b_identity_loss.append(misc[1][3].numpy())
 
     end = time.time()
-    elapsed_time = datetime.timedelta(seconds=epoch_end-epoch_start)
+    elapsed_time = datetime.timedelta(seconds=end-start)
 
     avg_gen_ab_loss = np.array(total_gen_ab_loss).mean()
     avg_gen_ba_loss = np.array(total_gen_ba_loss).mean()
@@ -2075,28 +2116,30 @@ def test(genAB, genBA, disAB, disBA, test_setA, test_setB):
     LOG.add_row('Avg Dis BA loss', avg_dis_ba_loss, fmt='{}: {:.6f}')
     LOG.flush('INFO')
 
+@tf.function
 def train_step(a, b, genAB, genBA, disAB, disBA, genAB_opt, genBA_opt, disAB_opt, disBA_opt):
 
     # since I calling gradient() for twice, `persistent` must be set to True
     with tf.GradientTape(persistent=True) as tape:
 
         # generate
-        b_gen = genAB(a, training=True) #G(x)
-        a_gen = genBA(b, training=True) #
-        a_regen = genBA(b_gen, training=True)
-        b_regen = genAB(a_gen, training=True)
-        a_id = genBA(a, training=True)
-        b_id = genAB(b, training=True)
+        b_gen = genAB(a, training=True) # G(x)
+        a_gen = genBA(b, training=True) # F(y)
+        a_regen = genBA(b_gen, training=True) # F(G(x))
+        b_regen = genAB(a_gen, training=True) # G(F(y))
+        a_id = genBA(a, training=True) # F(x)
+        b_id = genAB(b, training=True) # G(y)
 
         # discriminate
-        b_pred = disAB(b, training=True)
-        a_pred = disBA(a, training=True)
-        gen_b_pred = disAB(b_gen, training=True)
-        gen_a_pred = disBA(a_gen, training=True)
+        b_pred = disAB(b, training=True) # D(y)=True
+        a_pred = disBA(a, training=True) # H(x)=True
+        gen_b_pred = disAB(b_gen, training=True) # D(G(x))=False
+        gen_a_pred = disBA(a_gen, training=True) # H(F(y))=False
         
-
-        gen_ab_loss, *gen_ab_misc = genAB.loss(a, b, a_regen, b_regen, a_pred, b_id, CYCLE_A_LAMBDA, CYCLE_B_LAMBDA, verbose=VERBOSE)
-        gen_ba_loss, *gen_ba_misc = genBA.loss(b, a, b_regen, a_regen, b_pred, a_id, CYCLE_B_LAMBDA, CYCLE_A_LAMBDA, verbose=VERBOSE)
+        #------------------------------------  x, y, F(G(x)), G(F(y)), D(G(x)),    G(y), lambda1,        lambda2)
+        gen_ab_loss, *gen_ab_misc = genAB.loss(a, b, a_regen, b_regen, gen_b_pred, b_id, CYCLE_A_LAMBDA, CYCLE_B_LAMBDA, verbose=VERBOSE)
+        gen_ba_loss, *gen_ba_misc = genBA.loss(b, a, b_regen, a_regen, gen_a_pred, a_id, CYCLE_B_LAMBDA, CYCLE_A_LAMBDA, verbose=VERBOSE)
+        #----------------------  D(y),   D(G(x))
         dis_ab_loss = disAB.loss(b_pred, gen_b_pred)
         dis_ba_loss = disBA.loss(a_pred, gen_a_pred)
 
@@ -2120,9 +2163,48 @@ def train(genAB, genBA, disAB, disBA, genAB_opt, genBA_opt, disAB_opt, disBA_opt
 
     LOG.info('Start training for {} epochs'.format(EPOCHS))
 
-    def plot_sample(data, fname_suffix=''):
+    def plot_sample(a, b, fname_suffix=''):
 
-        pass
+        def plot(a, b, a_gen, b_gen, fname):
+
+            plt.figure(figsize=(10, 10))
+
+            def add_subplot(img, title, axis):
+                plt.subplot(2, 2, axis, frameon=False)
+                plt.title(title, fontsize=24)
+                plt.imshow(img * 0.5+0.5)
+                plt.axis('off')
+
+            add_subplot(a, 'Real Image A', 1)
+            add_subplot(b, 'Real Image B', 2)
+            add_subplot(b_gen, 'A -> B', 3)
+            add_subplot(a_gen, 'B -> A', 4)
+
+            plt.tight_layout()
+
+            os.makedirs(os.path.dirname(fname), exist_ok=True)
+            plt.savefig(fname)
+            # close figure
+            plt.close()
+            LOG.info('[Image Saved] save to: {}'.format(fname))
+        
+        # if data is a tensor, convert it to a numpy array
+        if tf.is_tensor(a) and hasattr(a, 'numpy'):
+            a = a.numpy()
+
+        if tf.is_tensor(b) and hasattr(b, 'numpy'):
+            b = b.numpy()
+
+        # reshape images
+        a = a.reshape((IMAGE_HEIGHT, IMAGE_WIDTH, 3))
+        b = b.reshape((IMAGE_HEIGHT, IMAGE_WIDTH, 3))
+        # generate images
+        b_gen = inference(a, genAB, preprocess=False)
+        a_gen = inference(b, genBA, preprocess=False)
+
+        plot_path = os.path.join(MODEL_DIR, 'images/{}_epoch_{}.png'.format(MODEL_NAME, fname_suffix))
+        plot(a, b, a_gen, b_gen, plot_path)
+
 
     # take one sample from training set A to draw and evaluate results
     for one_trainA in train_setA.take(1): pass
@@ -2186,6 +2268,7 @@ def train(genAB, genBA, disAB, disBA, genAB_opt, genBA_opt, disAB_opt, disBA_opt
                     LOG.add_row('Dis BA loss', dis_ba_loss, fmt='{}: {:.6f}')
                     LOG.flush('INFO')
                     # =================
+
         epoch_end = time.time()
 
         elapsed_time = datetime.timedelta(seconds=epoch_end-epoch_start)
@@ -2219,6 +2302,8 @@ def train(genAB, genBA, disAB, disBA, genAB_opt, genBA_opt, disAB_opt, disBA_opt
                 (epoch+1) % EVAL_EPOCHS == 0):
             
             test(genAB, genBA, disAB, disBA, test_setA, test_setB)
+            plot_sample(one_trainA, one_trainB, '{}_train'.format(epoch+1))
+            plot_sample(one_testA, one_testB, '{}_test'.format(epoch+1))
 
         if (SAVE_EPOCHS > 0 and
                 (epoch+1) % SAVE_EPOCHS == 0):
@@ -2227,8 +2312,14 @@ def train(genAB, genBA, disAB, disBA, genAB_opt, genBA_opt, disAB_opt, disBA_opt
             LOG.info('[Model Saved] save to: {}'.format(save_path))
 
     test(genAB, genBA, disAB, disBA, test_setA, test_setB)
+    plot_sample(one_trainA, one_trainB, 'final_train')
+    plot_sample(one_testA, one_testB, 'final_test')
 
-            
+def initialize_modules(genAB, genBA, disAB, disBA, training=False):
+    genAB(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32), training=training)
+    genBA(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32), training=training)
+    disAB(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32), training=training)
+    disBA(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32), training=training)
 
 
 if __name__ == '__main__':
@@ -2244,9 +2335,6 @@ if __name__ == '__main__':
     genBA = Generator(net=UNet256, name='genBA') # B -> A
     disAB = Discriminator(net=DBasic, name='disAB')
     disBA = Discriminator(net=DBasic, name='disBA')
-
-
-
 
     # create optimizers
     genAB_opt = tf.optimizers.Adam(learning_rate=GEN_LR, beta_1=0.5)
@@ -2268,14 +2356,11 @@ if __name__ == '__main__':
     manager = tf.train.CheckpointManager(checkpoint, MODEL_DIR, max_to_keep=3, checkpoint_name=MODEL_NAME)
 
     # initialize modules
-    genAB(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32))
-    genBA(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32))
-    disAB(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32))
-    disBA(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32))
+    initialize_modules(genAB, genBA, disAB, disBA, training=TRAIN)
 
 
     if manager.latest_checkpoint is not None:
-        LOG.warning('Restore checkpoint from: {}'.format(manager.latest_checkpoint))
+        LOG.debug('Restore checkpoint from: {}'.format(manager.latest_checkpoint))
     
     # restore checkpoint
     status = checkpoint.restore(manager.latest_checkpoint)
@@ -2296,7 +2381,7 @@ if __name__ == '__main__':
 
         train(genAB, genBA, disAB, disBA, 
               genAB_opt, genBA_opt, disAB_opt, disBA_opt, 
-              checkpoint, 
+              manager, 
               train_setA, train_setB,
               test_setA, test_setB)
 
@@ -2308,6 +2393,3 @@ if __name__ == '__main__':
         # test mode
         test(genAB, genBA, disAB, disBA, 
             test_setA, test_setB)
-
-        
-        
