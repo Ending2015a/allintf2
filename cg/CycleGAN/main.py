@@ -78,6 +78,7 @@ TRAIN_A_FILE = '*.jpg'      # {TRAIN_A_PATH}/{TRAIN_A_FILE}: horse2zebra/trainA/
 TRAIN_B_FILE = '*.jpg'
 TEST_A_FILE = '*.jpg'
 TEST_B_FILE = '*.jpg'
+LABELS = ['Horse', 'Zebra', 'Horse -> Zebra', 'Zebra -> Horse']
 
 SEED=None          # random seed
 MODEL_DIR = None   # checkpoint path
@@ -2175,10 +2176,10 @@ def train(genAB, genBA, disAB, disBA, genAB_opt, genBA_opt, disAB_opt, disBA_opt
                 plt.imshow(img * 0.5+0.5)
                 plt.axis('off')
 
-            add_subplot(a, 'Real Image A', 1)
-            add_subplot(b, 'Real Image B', 2)
-            add_subplot(b_gen, 'A -> B', 3)
-            add_subplot(a_gen, 'B -> A', 4)
+            add_subplot(a, LABELS[0], 1)
+            add_subplot(b, LABELS[1], 2)
+            add_subplot(b_gen, LABELS[2], 3)
+            add_subplot(a_gen, LABELS[3], 4)
 
             plt.tight_layout()
 
