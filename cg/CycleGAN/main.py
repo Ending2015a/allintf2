@@ -291,7 +291,7 @@ def apply_hyperparameters(args):
     LOG.add_row()
     LOG.add_rows('Cycle GAN', fmt='{:@f:ANSI_Shadow}', align='center')
     LOG.add_row('Paper: Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks')
-    LOG.add_row('Author: Zhu, Jun-Yan and Park, Taesung and Isola, Phillip and Efros, Alexei A')
+    LOG.add_row('Authors: Jun-Yan Zhu, Taesung Park, Phillip Isola, Alexei A. Efros')
     LOG.add_line()
     
     LOG.add_row('TensorFlow 2.0 implementation.')
