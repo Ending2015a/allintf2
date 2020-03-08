@@ -33,62 +33,56 @@ Reference:
     Github: https://github.com/junyanz/CycleGAN
 '''
 
-# === GPU settings ===
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-
-gpus = tf.config.experimental.list_physical_devices('GPU')
-
-for gpu in gpus:
-    tf.config.experimental.set_memory_growth(gpu, True)
-
 # === Tensorflow settings ===
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 # === Hyper-parameters ===
-IMAGE_HEIGHT = 256
-IMAGE_WIDTH = 256
-CHANNEL_FIRST = False  # True => NCHW, False => NHWC
+IMAGE_HEIGHT: int = 256
+IMAGE_WIDTH: int = 256
+CHANNEL_FIRST: bool = False  # True => NCHW, False => NHWC
 
-INFERENCE = False   # inference mode
-INPUT_PATH = None   # input image path
-OUTPUT_PATH = None  # output image path
+INFERENCE: bool = False   # inference mode
+INPUT_PATH: str = None    # input image path
+OUTPUT_PATH: str = None   # output image path
+REVERSE: bool = False     # convert from domain B to A
 
-TRAIN = False          # train or test mode
-BATCH_SIZE = 1         # training batch size
-CYCLE_A_LAMBDA = 10.0  # forward cycle consistency loss (A -> B -> A)
-CYCLE_B_LAMBDA = 10.0  # backward cycle consistency loss (B -> A -> B)
-ID_LAMBDA = 0.5        # identity loss
-GEN_LR = 2e-4          # generator learning rate
-DIS_LR = 2e-4          # discriminator learning rate
-EPOCHS = 1000          # total training epochs
-EVAL_EPOCHS = 1        # evalute per epochs
-SAVE_EPOCHS = 10       # save checkpoint for every 10 epochs
-#EXPORT_BEST = False
-EXPORT_LATEST = True   # export latest model
+TRAIN: bool = False           # train or test mode
+BATCH_SIZE: int = 1           # training batch size
+CYCLE_A_LAMBDA: float = 10.0  # forward cycle consistency loss (A -> B -> A)
+CYCLE_B_LAMBDA: float = 10.0  # backward cycle consistency loss (B -> A -> B)
+ID_LAMBDA: float = 0.5        # identity loss
+GEN_LR: float = 2e-4          # generator learning rate
+DIS_LR: float = 2e-4          # discriminator learning rate
+EPOCHS: int = 1000            # total training epochs
+EVAL_EPOCHS: int = 1          # evalute per epochs
+SAVE_EPOCHS: int = 10         # save checkpoint for every 10 epochs
+KEEP: int = 5                 # number of checkpoints to keep
+EXPORT_LATEST: bool = True    # export latest model
+EXPORT_PATH: str = None       # path to exported model
 
-DATA_FILENAME = 'horse2zebra.zip'
-DATA_URL = 'https://people.eecs.berkeley.edu/~taesung_park/CycleGAN/datasets/horse2zebra.zip'
-DATA_ROOT = 'datasets'
-TRAIN_A_PATH = 'horse2zebra/trainA'
-TRAIN_B_PATH = 'horse2zebra/trainB'
-TEST_A_PATH = 'horse2zebra/testA'
-TEST_B_PATH = 'horse2zebra/testB'
-TRAIN_A_FILE = '*.jpg'      # {TRAIN_A_PATH}/{TRAIN_A_FILE}: horse2zebra/trainA/*.jpg
-TRAIN_B_FILE = '*.jpg'
-TEST_A_FILE = '*.jpg'
-TEST_B_FILE = '*.jpg'
-LABELS = ['Horse', 'Zebra', 'Horse -> Zebra', 'Zebra -> Horse']
+DATA_FILENAME: str = 'horse2zebra.zip'
+DATA_URL: str = 'https://people.eecs.berkeley.edu/~taesung_park/CycleGAN/datasets/horse2zebra.zip'
+DATA_ROOT: str = 'datasets'
+TRAIN_A_PATH: str = 'horse2zebra/trainA'
+TRAIN_B_PATH: str = 'horse2zebra/trainB'
+TEST_A_PATH: str = 'horse2zebra/testA'
+TEST_B_PATH: str = 'horse2zebra/testB'
+TRAIN_A_FILE: str = '*.jpg'      # {TRAIN_A_PATH}/{TRAIN_A_FILE}: horse2zebra/trainA/*.jpg
+TRAIN_B_FILE: str = '*.jpg'
+TEST_A_FILE: str = '*.jpg'
+TEST_B_FILE: str = '*.jpg'
+LABELS: list = ['Horse', 'Zebra', 'Horse -> Zebra', 'Zebra -> Horse']
 
-SEED=None          # random seed
-MODEL_DIR = None   # checkpoint path
-MODEL_NAME = None  # checkpoint name
-LOG_PATH = None    # logging path
-LOG_LEVEL = 'INFO' # logging level
-LOG = None         # logger
-VERBOSE = False    # show more log info
+SEED: int = None          # random seed
+MODEL_DIR: str = None     # checkpoint path
+MODEL_NAME: str = None    # checkpoint name
+LOG_PATH: str = None      # logging path
+LOG_LEVEL: str = 'INFO'   # logging level
+LOG = None                # logger
+VERBOSE: bool = False     # show more log info
 
-BUFFER_SIZE = 100  # buffer size for shuffling training datasets
+BUFFER_SIZE: int = 100  # buffer size for shuffling training datasets
 
 def make_timestamp(dtime='now', fmt='%Y-%m-%d_%H.%M.%S'):
     '''
@@ -109,7 +103,7 @@ def parse_args():
     sec_timestamp = make_timestamp(fmt='%Y-%m-%d_%H.%M.%S')
 
     # create parser
-    parser = argparse.ArgumentParser(description='Pix2Pix')
+    parser = argparse.ArgumentParser(description='CycleGAN')
     
     # model parameters
     parser.add_argument('--image_height', type=int, help='The height of images', default=IMAGE_HEIGHT)
@@ -119,6 +113,7 @@ def parse_args():
     # inference parameters
     parser.add_argument('-i', '--input', dest='input_path', type=str, help='Input path', default=None)
     parser.add_argument('-o', '--output', dest='output_path', type=str, help='Output path', default=None)
+    parser.add_argument('-r', '--reverse', help='Whether to convert images from domain B to A', action='store_true')
 
     # training parameters
     parser.add_argument('--train', help='Training mode', action='store_true')
@@ -131,6 +126,9 @@ def parse_args():
     parser.add_argument('--epochs', type=int, help='Training epochs', default=EPOCHS)
     parser.add_argument('--eval_epochs', type=int, help='Evaluate every N epochs', default=EVAL_EPOCHS)
     parser.add_argument('--save_epochs', type=int, help='Save model for every N epochs', default=SAVE_EPOCHS)
+    parser.add_argument('--keep', type=int, help='Number of checkpoints to keep', default=KEEP)
+    parser.add_argument('--export_latest', help='Export the latest models', action='store_true')
+    parser.add_argument('--export_path', type=str, help='Path to exported latest models', default=None)
     #parser.add_argument('--export_best', help='Whether to export the best model', action='store_true')
 
     # dataset parameters
@@ -147,6 +145,7 @@ def parse_args():
     parser.add_argument('--test_b_file', type=str, help='The filename of the test set of pair B', default=TEST_B_FILE)
 
     # other settings
+    parser.add_argument('--gpus', type=int, nargs='+', help='GPUs to use', default=0)
     parser.add_argument('--seed', type=int, help='Random seed', default=None)
     parser.add_argument('--model_dir', type=str, help='The model directory, default: ./model/ckpt-{timestamp}', 
                                                   default='./model/ckpt-{}'.format(day_timestamp))
@@ -171,6 +170,7 @@ def apply_hyperparameters(args):
     global INFERENCE
     global INPUT_PATH
     global OUTPUT_PATH
+    global REVERSE
 
     global TRAIN
     global BATCH_SIZE
@@ -182,8 +182,9 @@ def apply_hyperparameters(args):
     global EPOCHS
     global EVAL_EPOCHS
     global SAVE_EPOCHS
-    #global EXPORT_BEST
+    global KEEP
     global EXPORT_LATEST
+    global EXPORT_PATH
 
     global DATA_FILENAME
     global DATA_URL
@@ -214,6 +215,7 @@ def apply_hyperparameters(args):
     INFERENCE = True if args.input_path else False
     INPUT_PATH = args.input_path
     OUTPUT_PATH = args.output_path
+    REVERSE = args.reverse
 
     TRAIN = args.train
     BATCH_SIZE = args.batch_size
@@ -225,8 +227,9 @@ def apply_hyperparameters(args):
     EPOCHS = args.epochs
     EVAL_EPOCHS = args.eval_epochs
     SAVE_EPOCHS = args.save_epochs
-    #EXPORT_BEST = args.export_best
-    #EXPORT_LATEST = not args.export_best
+    KEEP = args.keep
+    EXPORT_LATEST = args.export_latest
+    EXPORT_PATH = args.export_path
 
     DATA_FILENAME = args.data_filename
     DATA_URL = args.data_url
@@ -255,6 +258,22 @@ def apply_hyperparameters(args):
         fname = os.path.basename(INPUT_PATH)
         name, ext = os.path.splitext(fname)
         OUTPUT_PATH = './{}_generated' + ext
+        LOG.warning('The output path is not specified. The output will be stored in: {}'.format(OUTPUT_PATH))
+
+    # export path not specified
+    if EXPORT_LATEST and EXPORT_PATH is None:
+        EXPORT_PATH = os.path.join(MODEL_DIR, 'final')
+        LOG.warning('The export path is not specified. The model will be exported to: {}'.format(EXPORT_PATH))
+
+    # GPU settings
+    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(args.gpus)
+
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+
+    # enable growth
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+
 
     # fixed random seed if specified
     if args.seed is not None:
@@ -301,8 +320,9 @@ def apply_hyperparameters(args):
         LOG.add_row('Discriminator lr', DIS_LR)
         LOG.add_row('Eval epochs', EVAL_EPOCHS)
         LOG.add_row('Save epochs', SAVE_EPOCHS)
-        #LOG.add_row('Export best', EXPORT_BEST)
+        LOG.add_row('Keep', KEEP)
         LOG.add_row('Export latest', EXPORT_LATEST)
+        LOG.add_row('Export path', EXPORT_PATH)
     
     if not INFERENCE:
         # training or testing mode
@@ -320,6 +340,7 @@ def apply_hyperparameters(args):
         LOG.subgroup('inference')
         LOG.add_row('Input path', INPUT_PATH)
         LOG.add_row('Output path', OUTPUT_PATH)
+        LOG.add_row('Reverse', REVERSE)
 
     LOG.subgroup('others')
     LOG.add_row('Random seed', SEED)
@@ -527,7 +548,7 @@ class Conv(tf.Module):
     def __init__(self, n_kernel,
                        size,
                        stride,
-                       gain=tf.initializers.RandomNormal(0.0, 0.02),
+                       gain=0.02,
                        bias=0.0,
                        dilations=1,
                        padding='SAME',
@@ -676,7 +697,7 @@ class Deconv(tf.Module):
     def __init__(self, n_kernel,
                        size,
                        stride,
-                       gain=tf.initializers.RandomNormal(0.0, 0.02),
+                       gain=0.02,
                        bias=0.0,
                        dilations=1,
                        padding='SAME',
@@ -2316,7 +2337,19 @@ def train(genAB, genBA, disAB, disBA, genAB_opt, genBA_opt, disAB_opt, disBA_opt
     plot_sample(one_trainA, one_trainB, 'final_train')
     plot_sample(one_testA, one_testB, 'final_test')
 
+    # export final models
+    if EXPORT_LATEST:
+        genAB_path = os.path.join(EXPORT_PATH, MODEL_NAME + '_AB')
+        genBA_path = os.path.join(EXPORT_PATH, MODEL_NAME + '_BA')
+        tf.saved_model.save(genAB, genAB_path)
+        tf.saved_model.save(genBA, genBA_path)
+
+        LOG.info('[Model Exported] The generator A->B is saved to: {}'.format(genAB_path))
+        LOG.info('[Model Exported] The generator B->A is saved to: {}'.format(genBA_path))
+
+
 def initialize_modules(genAB, genBA, disAB, disBA, training=False):
+    # forward zero
     genAB(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32), training=training)
     genBA(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32), training=training)
     disAB(np.zeros((BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.float32), training=training)
@@ -2366,15 +2399,19 @@ if __name__ == '__main__':
     # restore checkpoint
     status = checkpoint.restore(manager.latest_checkpoint)
 
+
+    # if train or test, create testing datasets
     if not INFERENCE:
         test_setA = create_dataset(path=os.path.join(data_path, os.path.join(TEST_A_PATH, TEST_A_FILE)),
                                     is_train=False)
         test_setB = create_dataset(path=os.path.join(data_path, os.path.join(TEST_B_PATH, TEST_B_FILE)),
                                     is_train=False)
 
+
+    # === Train/Test/Inference ===
+    # train
     if TRAIN:
-        # training mode
-        
+
         train_setA = create_dataset(path=os.path.join(data_path, os.path.join(TRAIN_A_PATH, TRAIN_A_FILE)),
                                     is_train=True)
         train_setB = create_dataset(path=os.path.join(data_path, os.path.join(TRAIN_B_PATH, TRAIN_B_FILE)),
@@ -2386,11 +2423,19 @@ if __name__ == '__main__':
               train_setA, train_setB,
               test_setA, test_setB)
 
+    # inference
     elif INFERENCE:
-        # inference mode
-        pass
+        image = plt.imread(INPUT_PATH)
+        if REVERSE:
+            output = inference(image, genBA) # from B to A
+        else:
+            output = inference(image, genAB) # from A to B
     
+        plt.imsave(OUTPUT_PATH, output)
+
+        LOG.info('[Image Saved] The output is saved to: {}'.format(OUTPUT_PATH))
+
+    # test
     else:
-        # test mode
         test(genAB, genBA, disAB, disBA, 
             test_setA, test_setB)
