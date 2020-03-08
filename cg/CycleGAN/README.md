@@ -1,9 +1,9 @@
 # CycleGAN
 
-Tensorflow 2.0 implementation
+Tensorflow 2.0 implementation<br>
 Implemented Date: 2020/03/07
 
-Paper: [Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks](https://arxiv.org/abs/1703.10593)
+Paper: [Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks](https://arxiv.org/abs/1703.10593)<br>
 Authors: Jun-Yan Zhu, Taesung Park, Phillip Isola, Alexei A. Efros
 
 ## Results

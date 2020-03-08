@@ -1,9 +1,9 @@
 # Pix2Pix
 
-Tensorflow 2.0 implementation
+Tensorflow 2.0 implementation<br>
 Implemented Date: 2020/03/01
 
-Paper: [Image-to-Image Translation with Conditional Adversarial Networks](https://arxiv.org/abs/1611.07004)
+Paper: [Image-to-Image Translation with Conditional Adversarial Networks](https://arxiv.org/abs/1611.07004)<br>
 Authors: Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, Alexei A. Efros
 
 
@@ -23,7 +23,7 @@ matplotlib
 ``` 
 
 ## How to Use:
-* Trainv
+* Train
 ```
 ./train
 ```
