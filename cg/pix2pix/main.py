@@ -40,17 +40,8 @@ Reference:
     Github: https://github.com/phillipi/pix2pix
 '''
 
-# === GPU settings ===
-os.environ['CUDAVISIBLE_DEVICES'] = '0'
-
-gpus = tf.config.experimental.list_physical_devices('GPU')
-
-for gpu in gpus:
-    tf.config.experimental.set_memory_growth(gpu, True)
-
 # === Logging settings ===
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-DEFAULT_LOGGING_LEVEL = 'DEBUG'
 
 
 # === Hyper-parameters ===
@@ -142,6 +133,7 @@ def parse_args():
     parser.add_argument('--test_file', type=str, help='The filename of the testing set', default=TEST_FILE)
 
     # other settings
+    parser.add_argument('--gpus', type=int, nargs='+', help='GPUs to use', default=[0])
     parser.add_argument('--seed', type=int, help='Random seed', default=None)
     parser.add_argument('--model_dir', type=str, help='The model directory, default: ./model/ckpt-{timestamp}', 
                                                   default='./model/ckpt-{}'.format(day_timestamp))
@@ -239,6 +231,14 @@ def apply_hyperparameters(args):
         name, ext = os.path.splitext(fname)
         OUTPUT_PATH = './{}_generated' + ext
 
+    # GPU settings
+    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(args.gpus)
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+
+    # enable growth
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+
     # fixed random seed if specified
     if args.seed is not None:
         tf.random.set_seed(SEED)
@@ -252,6 +252,20 @@ def apply_hyperparameters(args):
     LOG = logger.getLogger('main')
 
     # ====== print args
+
+    LOG.add_row()
+    LOG.add_rows('Pix 2 Pix', fmt='{:@f:ANSI_Shadow}', align='center')
+    LOG.add_row('Paper: Image-to-Image Translation with Conditional Adversarial Networks')
+    LOG.add_row('Authors: Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, Alexei A. Efros')
+    LOG.add_line()
+    
+    LOG.add_row('TensorFlow 2.0 implementation.')
+    LOG.add_row('Implemented by Tsu-Ching Hsiao (Ending2015a) on 2020.03.01', align='right')
+    LOG.add_row('Github: https://github.com/Ending2015a')
+    LOG.add_row('Project: https://github.com/Ending2015a/allintf2')
+    
+    LOG.flush('INFO')
+
     LOG.set_header('Arguments')
 
     LOG.subgroup('model')
@@ -489,7 +503,7 @@ class Conv(tf.Module):
     def __init__(self, n_kernel,
                        size,
                        stride,
-                       gain=tf.initializers.RandomNormal(0.0, 0.02),
+                       gain=0.02,
                        bias=0.0,
                        dilations=1,
                        padding='SAME',
@@ -636,7 +650,7 @@ class Deconv(tf.Module):
     def __init__(self, n_kernel,
                        size,
                        stride,
-                       gain=tf.initializers.RandomNormal(0.0, 0.02),
+                       gain=0.02,
                        bias=0.0,
                        dilations=1,
                        padding='SAME',
@@ -811,7 +825,7 @@ class BatchNorm(tf.Module):
                        gain='ones',
                        bias='zeros',
                        mean='zeros',
-                       var=tf.initializers.Constant(value=0.02),
+                       var='ones',
                        channel_first=CHANNEL_FIRST,
                        name=None):
         '''
