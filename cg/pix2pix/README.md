@@ -10,10 +10,16 @@ Authors: Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, Alexei A. Efros
 ## Results:
 
 #### Generated from training images (100 epochs)
-![](https://raw.githubusercontent.com/Ending2015a/allintf2/master/cg/pix2pix/samples/final_train.png)
+![](https://raw.githubusercontent.com/Ending2015a/allintf2/master/cg/pix2pix/samples/final_train_100.png)
 
 #### Generated from testing images (100 epochs)
-![](https://raw.githubusercontent.com/Ending2015a/allintf2/master/cg/pix2pix/samples/final_test.png)
+![](https://raw.githubusercontent.com/Ending2015a/allintf2/master/cg/pix2pix/samples/final_test_100.png)
+
+#### Generated from training images (1000 epochs)
+![](https://raw.githubusercontent.com/Ending2015a/allintf2/master/cg/pix2pix/samples/final_train_1000.png)
+
+#### Generated from testing images (1000 epochs)
+![](https://raw.githubusercontent.com/Ending2015a/allintf2/master/cg/pix2pix/samples/final_test_1000.png)
 
 ## Requirements:
 ```
