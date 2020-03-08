@@ -232,7 +232,7 @@ def apply_hyperparameters(args):
         OUTPUT_PATH = './{}_generated' + ext
 
     # GPU settings
-    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(args.gpus)
+    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(n) for n in args.gpus])
     gpus = tf.config.experimental.list_physical_devices('GPU')
 
     # enable growth
