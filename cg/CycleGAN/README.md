@@ -7,7 +7,11 @@ Paper: [Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial N
 Authors: Jun-Yan Zhu, Taesung Park, Phillip Isola, Alexei A. Efros
 
 ## Results
+* UNet256 (187 epochs)
+![](https://github.com/Ending2015a/allintf2/blob/master/cg/CycleGAN/samples/unet256_187.png)
 
+* ResNet9Blocks (125 epochs)
+![](https://github.com/Ending2015a/allintf2/blob/master/cg/CycleGAN/samples/resnet9_125.png)
 
 
 ## Requirements
