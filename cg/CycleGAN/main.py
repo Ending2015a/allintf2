@@ -137,11 +137,10 @@ def parse_args():
     parser.add_argument('--keep', type=int, help='Number of checkpoints to keep', default=KEEP)
     parser.add_argument('--export_latest', help='Export the latest models', action='store_true')
     parser.add_argument('--export_path', type=str, help='Path to exported latest models', default=None)
-    #parser.add_argument('--export_best', help='Whether to export the best model', action='store_true')
 
     # dataset parameters
     parser.add_argument('--data_filename', type=str, help='The filename of the dataset', default=DATA_FILENAME)
-    parser.add_argument('--data_url', type=str, help='The url of the dataset', default=DATA_URL)
+    parser.add_argument('--data_url', type=str, help='The URL of the dataset. If using offline datasets, please set to ""', default=DATA_URL)
     parser.add_argument('--data_root', type=str, help='The root path to store the downloaded datasets', default=DATA_ROOT)
     parser.add_argument('--train_a_path', type=str, help='The root path to the training set of pair A', default=TRAIN_A_PATH)
     parser.add_argument('--train_b_path', type=str, help='The root path to the training set of pair B', default=TRAIN_B_PATH)
@@ -1334,6 +1333,8 @@ class DownSample(tf.Module):
             elif activ_type == 'relu':
                 self.activ = tf.nn.relu
                 self.activ_kwargs = dict()
+            else:
+                raise NotImplementedError('The activation function \'{}\' is not implemented'.format(activ_type))
 
     def __call__(self, input, training=True):
 
@@ -1989,9 +1990,6 @@ class DBasic(tf.Module):
 
             self.conv1 = Conv(1, 4, stride=1, is_biased=True) # output shape: [batch, 32, 32, 1]
 
-
-
-
     def __call__(self, input, training=True):
 
         output = self.down1(input, training=training)
@@ -2092,6 +2090,10 @@ def maybe_download_dataset(fname,
                            hash_algorithm='auto',
                            cache_subdir=os.path.abspath(DATA_ROOT),
                            archive_format='auto'):
+    
+    if not origin:
+        LOG.warning('The URL of the dataset is not specified')
+        return DATA_ROOT
 
     return tf.keras.utils.get_file(fname=fname,
                                    origin=origin,
@@ -2146,7 +2148,7 @@ def create_dataset(path, is_train=True):
         ds = ds.shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
     else:
         # test set, do not shuffle
-        ds = ds.batch(BATCH_SIZE)
+        ds = ds.shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
 
     return ds
 
@@ -2476,8 +2478,10 @@ def train(genAB, genBA, disAB, disBA, genAB_opt, genBA_opt, disAB_opt, disBA_opt
     if EXPORT_LATEST:
         genAB_path = os.path.join(EXPORT_PATH, MODEL_NAME + '_AB')
         genBA_path = os.path.join(EXPORT_PATH, MODEL_NAME + '_BA')
-        tf.saved_model.save(genAB, genAB_path)
-        tf.saved_model.save(genBA, genBA_path)
+        tf.saved_model.save(genAB, genAB_path, signatures=genAB.__call__.get_concrete_function(
+                            tf.TensorSpec(shape=[None, IMAGE_HEIGHT, IMAGE_WIDTH, 3], dtype=tf.float32, name='input')))
+        tf.saved_model.save(genBA, genBA_path, signatures=genBA.__call__.get_concrete_function(
+                            tf.TensorSpec(shape=[None, IMAGE_HEIGHT, IMAGE_WIDTH, 3], dtype=tf.float32, name='input')))
 
         LOG.info('[Model Exported] The generator A->B is saved to: {}'.format(genAB_path))
         LOG.info('[Model Exported] The generator B->A is saved to: {}'.format(genBA_path))
@@ -2529,7 +2533,7 @@ if __name__ == '__main__':
 
 
     if manager.latest_checkpoint is not None:
-        LOG.debug('Restore checkpoint from: {}'.format(manager.latest_checkpoint))
+        LOG.warning('Restore checkpoint from: {}'.format(manager.latest_checkpoint))
     
     # restore checkpoint
     status = checkpoint.restore(manager.latest_checkpoint)

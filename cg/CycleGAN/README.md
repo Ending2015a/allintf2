@@ -7,7 +7,8 @@ Paper: [Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial N
 Authors: Jun-Yan Zhu, Taesung Park, Phillip Isola, Alexei A. Efros
 
 ## Results
-Training...
+
+
 
 ## Requirements
 ```
@@ -24,8 +25,10 @@ matplotlib
 
 * Test
 ```
+./test
 ```
 
 * Inference
 ```
+./inference
 ```
